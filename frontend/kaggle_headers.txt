@@ -1,0 +1,26 @@
+HTTP/1.1 200 OK
+content-type: text/html; charset=utf-8
+vary: Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site
+x-ua-compatible: IE=edge
+access-control-allow-origin: *
+cache-control: no-cache, no-store, max-age=0, must-revalidate
+pragma: no-cache
+expires: Mon, 01 Jan 1990 00:00:00 GMT
+date: Sun, 09 Aug 2026 05:29:35 GMT
+strict-transport-security: max-age=31536000
+cross-origin-opener-policy: same-origin
+content-security-policy: require-trusted-types-for 'script';report-uri /recaptcha/challengepage/_/RecaptchaChallengePageUi/cspreport
+content-security-policy: script-src 'report-sample' 'nonce-YAjDy-T5JconKJ3AugM4XA' 'unsafe-inline';object-src 'none';base-uri www.google.com;report-uri /recaptcha/challengepage/_/RecaptchaChallengePageUi/cspreport;worker-src 'self'
+content-security-policy: script-src 'unsafe-inline' 'unsafe-eval' blob: data: 'self' https://apis.google.com https://ssl.gstatic.com https://www.google.com https://www.googletagmanager.com https://www.gstatic.com https://www.google-analytics.com https://recaptcha-staging.corp.google.com/;report-uri /recaptcha/challengepage/_/RecaptchaChallengePageUi/cspreport/allowlist;base-uri www.google.com
+permissions-policy: ch-ua-arch=*, ch-ua-bitness=*, ch-ua-full-version=*, ch-ua-full-version-list=*, ch-ua-model=*, ch-ua-wow64=*, ch-ua-form-factors=*, ch-ua-platform=*, ch-ua-platform-version=*
+cross-origin-resource-policy: same-site
+content-security-policy-report-only: script-src 'unsafe-inline' 'unsafe-eval' blob: data: https://www.google.com/recaptcha/enterprise.js https://www.gstatic.com/_/mss/boq-one-google/_/ https://www.gstatic.com/og/_/js/ https://apis.google.com/js/api.js https://apis.google.com/js/client.js https://www.googletagmanager.com/gtag/js https://www.google-analytics.com/analytics.js https://www.googletagmanager.com/gtag/destination https://www.gstatic.com/_/mss/boq-recaptcha/_/js/k=boq-recaptcha.RecaptchaChallengePageUi.en_US.Kl1g4mxYg9k.2018.O/ https://apis.google.com/_/scs/abc-static/_/js/ https://www.gstatic.com/recaptcha/releases/;report-uri /recaptcha/challengepage/_/RecaptchaChallengePageUi/cspreport/fine-allowlist
+accept-ch: Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Full-Version, Sec-CH-UA-Full-Version-List, Sec-CH-UA-Model, Sec-CH-UA-WoW64, Sec-CH-UA-Form-Factors, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version
+reporting-endpoints: default="/recaptcha/challengepage/_/RecaptchaChallengePageUi/web-reports?context=eJzjctHikmJw15BiaL15jnU6EJcsOs_aBsRdQDwHiA0VLrE6A3GRxBXWFiD-VHWDVaT6Buu3Yl82jhJfNpa3_mxCPBz7Fzy4zCawY-uv00xKekn5hfFFqcmJBSXJGYm6QJ4ukM7JSc1LTy1ITE-NNzIwMjOwMDDSMzCOLzAAAAO9MM8"
+server: ESF
+x-xss-protection: 0
+x-frame-options: SAMEORIGIN
+x-content-type-options: nosniff
+Alt-Svc: h3=":443"; ma=2592000
+Transfer-Encoding: chunked
+
