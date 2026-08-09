@@ -35,6 +35,7 @@ export default function ExplorePage() {
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState<any>(null);
     const [hasSearched, setHasSearched] = useState(false);
+    const [conversationMessage, setConversationMessage] = useState<string | null>(null);
     const [selectedCompare, setSelectedCompare] = useState<string[]>([]);
     const [activeDataset, setActiveDataset] = useState<DatasetItem | null>(null);
     const [sourceFilters, setSourceFilters] = useState<string[]>(['kaggle', 'huggingface']);
@@ -109,6 +110,7 @@ export default function ExplorePage() {
         setIsLoading(true);
         setHasSearched(true);
         setResults(null);
+        setConversationMessage(null);
         setSelectedCompare([]);
         setActiveDataset(null);
 
@@ -127,6 +129,11 @@ export default function ExplorePage() {
 
             const data = await response.json();
             setResults(data);
+            if (data?.intent && data.intent !== 'PROJECT_REQUEST') {
+                setConversationMessage(data.message || 'I can help with that. Tell me more about your idea.');
+            } else {
+                setConversationMessage(null);
+            }
         } catch (error) {
             console.error("Search error:", error);
         } finally {
@@ -303,232 +310,273 @@ export default function ExplorePage() {
                         </div>
                     ) : results ? (
                         <div className="space-y-8 text-left">
-
-                            {/* Gemini Analysis Panel */}
-                            <div className="relative group overflow-hidden rounded-3xl">
-                                <div className="absolute inset-0 bg-gradient-to-r from-rose-500/10 via-orange-500/10 to-amber-500/10 opacity-50 group-hover:opacity-100 transition duration-500"></div>
-                                <div className="relative bg-[#1c1917]/80 backdrop-blur-md border border-amber-500/30 p-8">
-                                    <div className="flex items-center gap-3 mb-4">
-                                        <div className="h-8 w-8 flex items-center justify-center rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]">
-                                            <span className="text-sm">✨</span>
-                                        </div>
-                                        <h3 className="text-xl font-semibold text-white">AI Project Analysis</h3>
-                                    </div>
-                                    <div className="text-slate-300 text-lg leading-relaxed mb-6">
-                                        {typeof results.analysis === 'string' ? (
-                                            <p>{results.analysis}</p>
-                                        ) : results.analysis ? (
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div><strong className="text-amber-200">Title:</strong> {results.analysis.project_title || 'N/A'}</div>
-                                                <div><strong className="text-amber-200">Domain:</strong> {results.analysis.domain || 'N/A'}</div>
-                                                <div><strong className="text-amber-200">Task:</strong> {results.analysis.task || 'N/A'}</div>
-                                                {results.analysis.secondary_task && (
-                                                    <div><strong className="text-amber-200">Secondary Task:</strong> {results.analysis.secondary_task}</div>
-                                                )}
-                                                <div><strong className="text-amber-200">Data Type:</strong> {results.analysis.data_type || 'N/A'}</div>
-                                                {results.analysis.models?.length > 0 && (
-                                                    <div className="col-span-2"><strong className="text-amber-200">Suggested Architecture:</strong> {results.analysis.models.join(", ")}</div>
-                                                )}
-                                            </div>
-                                        ) : (
-                                            <p>Project analysis is unavailable for this search.</p>
-                                        )}
-                                    </div>
-
-                                    {((results.analysis?.keywords?.length ?? 0) > 0 || (results.recommendationKeywords?.length ?? 0) > 0) && (
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span className="text-sm text-slate-500 mr-2">Keywords suggested:</span>
-                                            {(results.analysis?.keywords || results.recommendationKeywords || []).map((tag: string, i: number) => (
-                                                <span key={i} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs text-amber-200">
-                                                    {tag}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    )}
+                            {results.intent && results.intent !== 'PROJECT_REQUEST' ? (
+                                <div className="rounded-3xl border border-white/10 bg-[#1c1917]/80 p-8 text-center text-slate-200">
+                                    <h3 className="text-2xl font-semibold text-white mb-3">{conversationMessage || 'I can help with that.'}</h3>
+                                    <p className="text-slate-400">Share your AI/ML idea or problem statement, and I’ll suggest datasets, models, preprocessing steps, and a roadmap.</p>
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
-                                    <h3 className="text-lg font-semibold text-white mb-4">Project Summary</h3>
-                                    <div className="space-y-3 text-slate-300 text-sm">
-                                        <div><span className="text-slate-400">Project:</span> <span className="text-white">{summary?.projectTitle || results.analysis?.project_title}</span></div>
-                                        <div><span className="text-slate-400">Domain:</span> <span className="text-white">{summary?.domain || results.analysis?.domain}</span></div>
-                                        <div><span className="text-slate-400">Task:</span> <span className="text-white">{summary?.task || `${results.analysis?.task || 'N/A'}${results.analysis?.secondary_task ? ` + ${results.analysis.secondary_task}` : ''}`}</span></div>
-                                        <div><span className="text-slate-400">Data:</span> <span className="text-white">{summary?.dataType || results.analysis?.data_type || 'N/A'}</span></div>
-                                        <div><span className="text-slate-400">Datasets found:</span> <span className="text-white">{summary?.datasetsFound ?? results.results?.kaggle?.length ?? 0}</span></div>
-                                        <div><span className="text-slate-400">Models found:</span> <span className="text-white">{summary?.modelsFound ?? results.results?.hfModels?.length ?? 0}</span></div>
-                                    </div>
-                                </div>
-
-                                <div className="lg:col-span-2 rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
-                                    <div className="flex items-center justify-between gap-4 mb-4">
-                                        <div>
-                                            <h3 className="text-2xl font-semibold text-white">🏆 Best Dataset for Your Project</h3>
-                                            <p className="text-sm text-slate-400 mt-1">Recommended from Kaggle based on relevance, task match, and metadata.</p>
-                                        </div>
-                                        <span className="text-sm font-semibold text-emerald-300">{bestDataset?.relevanceScore ?? 0}% Match</span>
-                                    </div>
-                                    {bestDataset ? (
-                                        <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                                            <div className="space-y-2">
-                                                <h4 className="text-xl font-semibold text-slate-100">{bestDataset.title}</h4>
-                                                <p className="text-slate-400 text-sm">{bestDataset.subtitle || 'Dataset details unavailable'}</p>
-                                                <div className="grid gap-3 sm:grid-cols-2 mt-3 text-sm text-slate-300">
-                                                    <div><span className="text-slate-400">Source:</span> Kaggle</div>
-                                                    <div><span className="text-slate-400">License:</span> {bestDataset.license || 'Information unavailable'}</div>
-                                                    <div><span className="text-slate-400">Creator:</span> {bestDataset.creatorName || 'Unknown'}</div>
-                                                    <div><span className="text-slate-400">Size:</span> {formatBytes(bestDataset.datasetSize)}</div>
+                            ) : (
+                                <>
+                                    {/* Gemini Analysis Panel */}
+                                    <div className="relative group overflow-hidden rounded-3xl">
+                                        <div className="absolute inset-0 bg-gradient-to-r from-rose-500/10 via-orange-500/10 to-amber-500/10 opacity-50 group-hover:opacity-100 transition duration-500"></div>
+                                        <div className="relative bg-[#1c1917]/80 backdrop-blur-md border border-amber-500/30 p-8">
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className="h-8 w-8 flex items-center justify-center rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]">
+                                                    <span className="text-sm">✨</span>
                                                 </div>
-                                                <p className="text-slate-400 text-sm mt-3">This dataset closely matches your project because it includes relevant keywords, task-aligned metadata, and dataset attributes aligned to your {results.analysis?.task?.toLowerCase() || 'project'}.</p>
+                                                <h3 className="text-xl font-semibold text-white">AI Project Analysis</h3>
                                             </div>
-                                            <div className="flex flex-col gap-3 sm:items-end">
-                                                <a
-                                                    href={bestDataset.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:brightness-110 transition"
-                                                >
-                                                    View Dataset
-                                                </a>
-                                                <button
-                                                    onClick={() => setActiveDataset(bestDataset)}
-                                                    className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 hover:border-white/20 transition"
-                                                >
-                                                    View details
-                                                </button>
+                                            <div className="text-slate-300 text-lg leading-relaxed mb-6">
+                                                {typeof results.analysis === 'string' ? (
+                                                    <p>{results.analysis}</p>
+                                                ) : results.analysis ? (
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div><strong className="text-amber-200">Title:</strong> {results.analysis.project_title || 'N/A'}</div>
+                                                        <div><strong className="text-amber-200">Domain:</strong> {results.analysis.domain || 'N/A'}</div>
+                                                        <div><strong className="text-amber-200">Task:</strong> {results.analysis.task || 'N/A'}</div>
+                                                        {results.analysis.secondary_task && (
+                                                            <div><strong className="text-amber-200">Secondary Task:</strong> {results.analysis.secondary_task}</div>
+                                                        )}
+                                                        <div><strong className="text-amber-200">Data Type:</strong> {results.analysis.data_type || 'N/A'}</div>
+                                                        {results.analysis.models?.length > 0 && (
+                                                            <div className="col-span-2"><strong className="text-amber-200">Suggested Architecture:</strong> {results.analysis.models.join(", ")}</div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <p>Project analysis is unavailable for this search.</p>
+                                                )}
                                             </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-slate-500">No best dataset could be selected automatically.</div>
-                                    )}
-                                </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                <div>
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="w-8 h-8 rounded-full bg-[#20BEFF]/20 flex items-center justify-center text-[#20BEFF]">
-                                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.8 2h4l-8.5 8.6L23 22h-4.3l-5.8-9.1-3 2.9V22H6V2h3.9v10.5l8.9-10.5z" /></svg>
+                                            {((results.analysis?.keywords?.length ?? 0) > 0 || (results.recommendationKeywords?.length ?? 0) > 0) && (
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-sm text-slate-500 mr-2">Keywords suggested:</span>
+                                                    {(results.analysis?.keywords || results.recommendationKeywords || []).map((tag: string, i: number) => (
+                                                        <span key={i} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs text-amber-200">
+                                                            {tag}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
-                                        <h3 className="text-2xl font-semibold text-white">Kaggle Datasets</h3>
                                     </div>
 
-                                    <div className="grid gap-4">
-                                        {results.results?.kaggle?.length > 0 ? (
-                                            results.results.kaggle.map((ds: any, idx: number) => (
-                                                <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 transition hover:border-[#20BEFF]/40">
-                                                    <div className="flex items-start justify-between gap-4">
-                                                        <div>
-                                                            <h4 className="text-lg font-semibold text-white mb-1 truncate">{ds.title || ds.ref}</h4>
-                                                            <p className="text-slate-400 text-sm line-clamp-2">{ds.subtitle || 'No subtitle available'}</p>
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
+                                            <h3 className="text-lg font-semibold text-white mb-4">Project Summary</h3>
+                                            <div className="space-y-3 text-slate-300 text-sm">
+                                                <div><span className="text-slate-400">Project:</span> <span className="text-white">{summary?.projectTitle || results.analysis?.project_title}</span></div>
+                                                <div><span className="text-slate-400">Domain:</span> <span className="text-white">{summary?.domain || results.analysis?.domain}</span></div>
+                                                <div><span className="text-slate-400">Task:</span> <span className="text-white">{summary?.task || `${results.analysis?.task || 'N/A'}${results.analysis?.secondary_task ? ` + ${results.analysis.secondary_task}` : ''}`}</span></div>
+                                                <div><span className="text-slate-400">Data:</span> <span className="text-white">{summary?.dataType || results.analysis?.data_type || 'N/A'}</span></div>
+                                                <div><span className="text-slate-400">Datasets found:</span> <span className="text-white">{summary?.datasetsFound ?? results.results?.kaggle?.length ?? 0}</span></div>
+                                                <div><span className="text-slate-400">Models found:</span> <span className="text-white">{summary?.modelsFound ?? results.results?.hfModels?.length ?? 0}</span></div>
+                                            </div>
+                                        </div>
+
+                                        <div className="lg:col-span-2 rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
+                                            <div className="flex items-center justify-between gap-4 mb-4">
+                                                <div>
+                                                    <h3 className="text-2xl font-semibold text-white">🏆 Best Dataset for Your Project</h3>
+                                                    <p className="text-sm text-slate-400 mt-1">Recommended from Kaggle based on relevance, task match, and metadata.</p>
+                                                </div>
+                                                <span className="text-sm font-semibold text-emerald-300">{bestDataset?.relevanceScore ?? 0}% Match</span>
+                                            </div>
+                                            {bestDataset ? (
+                                                <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+                                                    <div className="space-y-2">
+                                                        <h4 className="text-xl font-semibold text-slate-100">{bestDataset.title}</h4>
+                                                        <p className="text-slate-400 text-sm">{bestDataset.subtitle || 'Dataset details unavailable'}</p>
+                                                        <div className="grid gap-3 sm:grid-cols-2 mt-3 text-sm text-slate-300">
+                                                            <div><span className="text-slate-400">Source:</span> Kaggle</div>
+                                                            <div><span className="text-slate-400">License:</span> {bestDataset.license || 'Information unavailable'}</div>
+                                                            <div><span className="text-slate-400">Creator:</span> {bestDataset.creatorName || 'Unknown'}</div>
+                                                            <div><span className="text-slate-400">Size:</span> {formatBytes(bestDataset.datasetSize)}</div>
                                                         </div>
-                                                        <label className="flex items-center gap-2 text-sm text-slate-300">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedCompare.includes(ds.ref)}
-                                                                onChange={() => toggleCompare(ds.ref)}
-                                                                className="h-4 w-4 rounded border-white/10 bg-slate-900 text-amber-300"
-                                                            />
-                                                            Compare
-                                                        </label>
+                                                        <p className="text-slate-400 text-sm mt-3">This dataset closely matches your project because it includes relevant keywords, task-aligned metadata, and dataset attributes aligned to your {results.analysis?.task?.toLowerCase() || 'project'}.</p>
                                                     </div>
-                                                    <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{ds.relevanceScore ?? 0}% match</span>
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{ds.source || 'Kaggle'}</span>
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{formatBytes(ds.datasetSize)}</span>
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{ds.license || 'License unavailable'}</span>
-                                                    </div>
-                                                    <div className="mt-4 flex flex-wrap gap-3">
+                                                    <div className="flex flex-col gap-3 sm:items-end">
                                                         <a
-                                                            href={ds.url}
+                                                            href={bestDataset.url}
                                                             target="_blank"
                                                             rel="noreferrer"
-                                                            className="rounded-2xl bg-[#20BEFF]/10 px-4 py-2 text-sm text-[#20BEFF] hover:bg-[#20BEFF]/15 transition"
+                                                            className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-6 py-3 text-sm font-semibold text-white hover:brightness-110 transition"
                                                         >
-                                                            View Dataset →
+                                                            View Dataset
                                                         </a>
                                                         <button
-                                                            onClick={() => setActiveDataset(ds)}
-                                                            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 hover:border-white/20 transition"
+                                                            onClick={() => setActiveDataset(bestDataset)}
+                                                            className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-100 hover:border-white/20 transition"
                                                         >
-                                                            Details
+                                                            View details
                                                         </button>
                                                     </div>
                                                 </div>
-                                            ))
-                                        ) : (
-                                            <div className="p-5 rounded-2xl border border-white/5 border-dashed text-slate-500 bg-white/[0.01]">
-                                                No Kaggle datasets found for these keywords.
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="w-8 h-8 rounded-full bg-[#FFD21E]/20 flex items-center justify-center text-[#FFD21E] text-xl">
-                                            🤗
+                                            ) : (
+                                                <div className="text-slate-500">No best dataset could be selected automatically.</div>
+                                            )}
                                         </div>
-                                        <h3 className="text-2xl font-semibold text-white">Recommended Models</h3>
                                     </div>
 
-                                    <div className="space-y-4">
-                                        {results.results?.hfModels?.length > 0 ? (
-                                            results.results.hfModels.slice(0, 6).map((md: any, idx: number) => (
-                                                <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 hover:border-[#FFD21E]/40 transition">
-                                                    <div className="flex items-center justify-between gap-4">
-                                                        <div>
-                                                            <h4 className="text-lg font-semibold text-amber-200 truncate">{md.id}</h4>
-                                                            <p className="text-slate-400 text-sm mt-1">{md.pipeline || 'Unknown task'}</p>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="w-8 h-8 rounded-full bg-[#20BEFF]/20 flex items-center justify-center text-[#20BEFF]">
+                                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M18.8 2h4l-8.5 8.6L23 22h-4.3l-5.8-9.1-3 2.9V22H6V2h3.9v10.5l8.9-10.5z" /></svg>
+                                                </div>
+                                                <h3 className="text-2xl font-semibold text-white">Kaggle Datasets</h3>
+                                            </div>
+
+                                            <div className="grid gap-4">
+                                                {results.results?.kaggle?.length > 0 ? (
+                                                    results.results.kaggle.map((ds: any, idx: number) => (
+                                                        <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 transition hover:border-[#20BEFF]/40">
+                                                            <div className="flex items-start justify-between gap-4">
+                                                                <div>
+                                                                    <h4 className="text-lg font-semibold text-white mb-1 truncate">{ds.title || ds.ref}</h4>
+                                                                    <p className="text-slate-400 text-sm line-clamp-2">{ds.subtitle || 'No subtitle available'}</p>
+                                                                </div>
+                                                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedCompare.includes(ds.ref)}
+                                                                        onChange={() => toggleCompare(ds.ref)}
+                                                                        className="h-4 w-4 rounded border-white/10 bg-slate-900 text-amber-300"
+                                                                    />
+                                                                    Compare
+                                                                </label>
+                                                            </div>
+                                                            <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.relevanceScore ?? 0}% match</span>
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.source || 'Kaggle'}</span>
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{formatBytes(ds.datasetSize)}</span>
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.license || 'License unavailable'}</span>
+                                                            </div>
+                                                            <div className="mt-4 flex flex-wrap gap-3">
+                                                                <a
+                                                                    href={ds.url}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="rounded-2xl bg-[#20BEFF]/10 px-4 py-2 text-sm text-[#20BEFF] hover:bg-[#20BEFF]/15 transition"
+                                                                >
+                                                                    View Dataset →
+                                                                </a>
+                                                                <button
+                                                                    onClick={() => setActiveDataset(ds)}
+                                                                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 hover:border-white/20 transition"
+                                                                >
+                                                                    Details
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                        <span className="text-sm font-semibold text-slate-200">{md.matchScore ?? 0}%</span>
+                                                    ))
+                                                ) : (
+                                                    <div className="p-5 rounded-2xl border border-white/5 border-dashed text-slate-500 bg-white/[0.01]">
+                                                        No Kaggle datasets found for these keywords.
                                                     </div>
-                                                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{md.difficulty || 'Unknown'}</span>
-                                                        <span className="px-2 py-1 rounded-full bg-white/5">{md.recommendation || 'Good choice'}</span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="w-8 h-8 rounded-full bg-[#FFD21E]/20 flex items-center justify-center text-[#FFD21E] text-xl">
+                                                    🤗
+                                                </div>
+                                                <h3 className="text-2xl font-semibold text-white">Recommended Models</h3>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                {results.results?.hfModels?.length > 0 ? (
+                                                    results.results.hfModels.slice(0, 6).map((md: any, idx: number) => (
+                                                        <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 hover:border-[#FFD21E]/40 transition">
+                                                            <div className="flex items-center justify-between gap-4">
+                                                                <div>
+                                                                    <h4 className="text-lg font-semibold text-amber-200 truncate">{md.id}</h4>
+                                                                    <p className="text-slate-400 text-sm mt-1">{md.pipeline || 'Unknown task'}</p>
+                                                                </div>
+                                                                <span className="text-sm font-semibold text-slate-200">{md.matchScore ?? 0}%</span>
+                                                            </div>
+                                                            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{md.difficulty || 'Unknown'}</span>
+                                                                <span className="px-2 py-1 rounded-full bg-white/5">{md.recommendation || 'Good choice'}</span>
+                                                            </div>
+                                                            <div className="mt-4 flex flex-wrap gap-3">
+                                                                <a
+                                                                    href={md.url}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="rounded-2xl bg-[#FFD21E]/10 px-4 py-2 text-sm text-[#FFD21E] hover:bg-[#FFD21E]/15 transition"
+                                                                >
+                                                                    View Model →
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="p-5 rounded-2xl border border-white/5 border-dashed text-slate-500 bg-white/[0.01]">
+                                                        No models found for these keywords.
                                                     </div>
-                                                    <div className="mt-4 flex flex-wrap gap-3">
-                                                        <a
-                                                            href={md.url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="rounded-2xl bg-[#FFD21E]/10 px-4 py-2 text-sm text-[#FFD21E] hover:bg-[#FFD21E]/15 transition"
-                                                        >
-                                                            View Model →
-                                                        </a>
+                                                )}
+                                            </div>
+
+                                            {results.results?.hfModels?.length > 0 && (
+                                                <div className="mt-6 rounded-3xl border border-white/10 bg-[#1c1917]/80 p-5">
+                                                    <h4 className="text-base font-semibold text-slate-100 mb-3">Model comparison</h4>
+                                                    <div className="overflow-x-auto">
+                                                        <table className="min-w-full text-left text-sm text-slate-300">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th className="pb-3 pr-4">Model</th>
+                                                                    <th className="pb-3 pr-4">Task</th>
+                                                                    <th className="pb-3 pr-4">Match</th>
+                                                                    <th className="pb-3 pr-4">Difficulty</th>
+                                                                    <th className="pb-3">Recommendation</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {results.results.hfModels.slice(0, 4).map((md: any) => (
+                                                                    <tr key={md.id} className="border-t border-white/5">
+                                                                        <td className="py-3 pr-4 text-slate-100">{md.id}</td>
+                                                                        <td className="py-3 pr-4">{md.pipeline || 'Unknown'}</td>
+                                                                        <td className="py-3 pr-4">{md.matchScore ?? 0}%</td>
+                                                                        <td className="py-3 pr-4">{md.difficulty || 'Unknown'}</td>
+                                                                        <td className="py-3">{md.recommendation || 'Good'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
                                                     </div>
                                                 </div>
-                                            ))
-                                        ) : (
-                                            <div className="p-5 rounded-2xl border border-white/5 border-dashed text-slate-500 bg-white/[0.01]">
-                                                No models found for these keywords.
-                                            </div>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
 
-                                    {results.results?.hfModels?.length > 0 && (
-                                        <div className="mt-6 rounded-3xl border border-white/10 bg-[#1c1917]/80 p-5">
-                                            <h4 className="text-base font-semibold text-slate-100 mb-3">Model comparison</h4>
+                                    {selectedCompare.length > 1 && (
+                                        <div className="rounded-3xl border border-white/10 bg-[#1c1917]/80 p-6">
+                                            <div className="flex items-center justify-between gap-4 mb-4">
+                                                <div>
+                                                    <h3 className="text-xl font-semibold text-white">Dataset Comparison</h3>
+                                                    <p className="text-slate-400 text-sm">Compare selected datasets side by side.</p>
+                                                </div>
+                                            </div>
                                             <div className="overflow-x-auto">
                                                 <table className="min-w-full text-left text-sm text-slate-300">
                                                     <thead>
                                                         <tr>
-                                                            <th className="pb-3 pr-4">Model</th>
-                                                            <th className="pb-3 pr-4">Task</th>
-                                                            <th className="pb-3 pr-4">Match</th>
-                                                            <th className="pb-3 pr-4">Difficulty</th>
-                                                            <th className="pb-3">Recommendation</th>
+                                                            <th className="pb-3 pr-4">Feature</th>
+                                                            {compareDatasets.map((ds) => (
+                                                                <th key={ds.ref} className="pb-3 pr-4">{ds.title}</th>
+                                                            ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {results.results.hfModels.slice(0, 4).map((md: any) => (
-                                                            <tr key={md.id} className="border-t border-white/5">
-                                                                <td className="py-3 pr-4 text-slate-100">{md.id}</td>
-                                                                <td className="py-3 pr-4">{md.pipeline || 'Unknown'}</td>
-                                                                <td className="py-3 pr-4">{md.matchScore ?? 0}%</td>
-                                                                <td className="py-3 pr-4">{md.difficulty || 'Unknown'}</td>
-                                                                <td className="py-3">{md.recommendation || 'Good'}</td>
+                                                        {['subtitle', 'license', 'datasetSize', 'creatorName', 'relevanceScore'].map((field) => (
+                                                            <tr key={field} className="border-t border-white/5">
+                                                                <td className="py-3 pr-4 text-slate-400 capitalize">{field === 'datasetSize' ? 'Size' : field === 'relevanceScore' ? 'Match' : field === 'creatorName' ? 'Creator' : field}</td>
+                                                                {compareDatasets.map((ds) => (
+                                                                    <td key={ds.ref + field} className="py-3 pr-4">{field === 'datasetSize' ? formatBytes(ds.datasetSize) : field === 'relevanceScore' ? `${ds.relevanceScore ?? 0}%` : ds[field] || 'Information unavailable'}</td>
+                                                                ))}
                                                             </tr>
                                                         ))}
                                                     </tbody>
@@ -536,123 +584,90 @@ export default function ExplorePage() {
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            </div>
 
-                            {selectedCompare.length > 1 && (
-                                <div className="rounded-3xl border border-white/10 bg-[#1c1917]/80 p-6">
-                                    <div className="flex items-center justify-between gap-4 mb-4">
-                                        <div>
-                                            <h3 className="text-xl font-semibold text-white">Dataset Comparison</h3>
-                                            <p className="text-slate-400 text-sm">Compare selected datasets side by side.</p>
-                                        </div>
-                                    </div>
-                                    <div className="overflow-x-auto">
-                                        <table className="min-w-full text-left text-sm text-slate-300">
-                                            <thead>
-                                                <tr>
-                                                    <th className="pb-3 pr-4">Feature</th>
-                                                    {compareDatasets.map((ds) => (
-                                                        <th key={ds.ref} className="pb-3 pr-4">{ds.title}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {['subtitle', 'license', 'datasetSize', 'creatorName', 'relevanceScore'].map((field) => (
-                                                    <tr key={field} className="border-t border-white/5">
-                                                        <td className="py-3 pr-4 text-slate-400 capitalize">{field === 'datasetSize' ? 'Size' : field === 'relevanceScore' ? 'Match' : field === 'creatorName' ? 'Creator' : field}</td>
-                                                        {compareDatasets.map((ds) => (
-                                                            <td key={ds.ref + field} className="py-3 pr-4">{field === 'datasetSize' ? formatBytes(ds.datasetSize) : field === 'relevanceScore' ? `${ds.relevanceScore ?? 0}%` : ds[field] || 'Information unavailable'}</td>
-                                                        ))}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                                <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
-                                    <h3 className="text-xl font-semibold text-white mb-4">Project Feasibility</h3>
-                                    <div className="grid gap-3">
-                                        <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Availability</span><span>{feasibility?.datasetAvailability ?? 'N/A'} / 100</span></div>
-                                        <div className="flex items-center justify-between text-sm text-slate-300"><span>Model Availability</span><span>{feasibility?.modelAvailability ?? 'N/A'} / 100</span></div>
-                                        <div className="flex items-center justify-between text-sm text-slate-300"><span>Computational Difficulty</span><span>{feasibility?.computationalDifficulty ?? 'N/A'} / 100</span></div>
-                                        <div className="flex items-center justify-between text-sm text-slate-300"><span>Documentation</span><span>{feasibility?.documentation ?? 'N/A'} / 100</span></div>
-                                        <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Quality</span><span>{feasibility?.datasetQuality ?? 'N/A'} / 100</span></div>
-                                        <div className="mt-4 rounded-3xl bg-white/5 p-4 text-sm text-slate-300">
-                                            <div className="font-semibold text-white text-lg">Overall {feasibility?.overall ?? 'N/A'} / 100</div>
-                                            <p className="mt-2 text-slate-400">{feasibility?.note}</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
-                                    <h3 className="text-xl font-semibold text-white mb-4">Recommended Hardware</h3>
-                                    <div className="space-y-4 text-slate-300 text-sm">
-                                        <div><span className="text-slate-400">GPU:</span> <span className="text-white">{hardware?.gpu || 'Estimated'}</span></div>
-                                        <div><span className="text-slate-400">RAM:</span> <span className="text-white">{hardware?.ram || 'Estimated'}</span></div>
-                                        <div><span className="text-slate-400">Storage:</span> <span className="text-white">{hardware?.storage || 'Estimated'}</span></div>
-                                        <div><span className="text-slate-400">Difficulty:</span> <span className="text-white">{hardware?.difficulty || 'Estimated'}</span></div>
-                                        <div><span className="text-slate-400">Cloud Alternative:</span> <span className="text-white">{hardware?.cloudAlternative || 'Estimated'}</span></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {activeDataset && (
-                                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-                                    <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-[#111010] border border-white/10 shadow-2xl">
-                                        <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
-                                            <div>
-                                                <h3 className="text-xl font-semibold text-white">{activeDataset.title}</h3>
-                                                <p className="text-slate-400 text-sm">{activeDataset.subtitle || 'Information unavailable'}</p>
-                                            </div>
-                                            <button
-                                                onClick={() => setActiveDataset(null)}
-                                                className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 hover:bg-white/5 transition"
-                                            >
-                                                Close
-                                            </button>
-                                        </div>
-                                        <div className="p-6 grid gap-4 lg:grid-cols-2">
-                                            <div className="space-y-3 text-slate-300 text-sm">
-                                                <div><span className="text-slate-400">Source:</span> Kaggle</div>
-                                                <div><span className="text-slate-400">Task:</span> {results.analysis?.task || 'Information unavailable'}</div>
-                                                <div><span className="text-slate-400">Data Type:</span> {results.analysis?.data_type || 'Information unavailable'}</div>
-                                                <div><span className="text-slate-400">Domain:</span> {results.analysis?.domain || 'Information unavailable'}</div>
-                                                <div><span className="text-slate-400">Classes:</span> Information unavailable</div>
-                                                <div><span className="text-slate-400">Dataset Size:</span> {formatBytes(activeDataset.datasetSize)}</div>
-                                                <div><span className="text-slate-400">License:</span> {activeDataset.license || 'Information unavailable'}</div>
-                                                <div><span className="text-slate-400">URL:</span> <a href={activeDataset.url} target="_blank" rel="noreferrer" className="text-amber-300 hover:text-amber-200">Open original dataset</a></div>
-                                            </div>
-                                            <div className="rounded-3xl bg-[#181616]/90 p-4 text-slate-300">
-                                                <h4 className="text-sm font-semibold text-white mb-3">Why we recommend it</h4>
-                                                <p className="text-sm leading-6">This dataset is ranked highly because it aligns with your project's task and data type, includes matching keywords, and has improved metadata signals for relevance.</p>
-                                                <div className="mt-5 space-y-3">
-                                                    <div><span className="text-slate-400">Recommendation:</span> {activeDataset.relevanceScore ?? 0}% match</div>
-                                                    <div><span className="text-slate-400">Suggested models:</span> {results.analysis?.models?.slice(0, 3).join(', ') || 'Information unavailable'}</div>
+                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                                        <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
+                                            <h3 className="text-xl font-semibold text-white mb-4">Project Feasibility</h3>
+                                            <div className="grid gap-3">
+                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Availability</span><span>{feasibility?.datasetAvailability ?? 'N/A'} / 100</span></div>
+                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Model Availability</span><span>{feasibility?.modelAvailability ?? 'N/A'} / 100</span></div>
+                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Computational Difficulty</span><span>{feasibility?.computationalDifficulty ?? 'N/A'} / 100</span></div>
+                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Documentation</span><span>{feasibility?.documentation ?? 'N/A'} / 100</span></div>
+                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Quality</span><span>{feasibility?.datasetQuality ?? 'N/A'} / 100</span></div>
+                                                <div className="mt-4 rounded-3xl bg-white/5 p-4 text-sm text-slate-300">
+                                                    <div className="font-semibold text-white text-lg">Overall {feasibility?.overall ?? 'N/A'} / 100</div>
+                                                    <p className="mt-2 text-slate-400">{feasibility?.note}</p>
                                                 </div>
-                                                <div className="mt-6 flex flex-col gap-3">
-                                                    <a
-                                                        href={activeDataset.url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white text-center hover:brightness-110 transition"
-                                                    >
-                                                        Open Original Dataset
-                                                    </a>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
+                                            <h3 className="text-xl font-semibold text-white mb-4">Recommended Hardware</h3>
+                                            <div className="space-y-4 text-slate-300 text-sm">
+                                                <div><span className="text-slate-400">GPU:</span> <span className="text-white">{hardware?.gpu || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">RAM:</span> <span className="text-white">{hardware?.ram || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">Storage:</span> <span className="text-white">{hardware?.storage || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">Difficulty:</span> <span className="text-white">{hardware?.difficulty || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">Cloud Alternative:</span> <span className="text-white">{hardware?.cloudAlternative || 'Estimated'}</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {activeDataset && (
+                                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+                                            <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-[#111010] border border-white/10 shadow-2xl">
+                                                <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
+                                                    <div>
+                                                        <h3 className="text-xl font-semibold text-white">{activeDataset.title}</h3>
+                                                        <p className="text-slate-400 text-sm">{activeDataset.subtitle || 'Information unavailable'}</p>
+                                                    </div>
                                                     <button
-                                                        onClick={() => setSelectedCompare((current) => current.includes(activeDataset.ref) ? current : [...current, activeDataset.ref].slice(0, 4))}
-                                                        className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 hover:border-white/20 transition"
+                                                        onClick={() => setActiveDataset(null)}
+                                                        className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-200 hover:bg-white/5 transition"
                                                     >
-                                                        Add to Comparison
+                                                        Close
                                                     </button>
                                                 </div>
+                                                <div className="p-6 grid gap-4 lg:grid-cols-2">
+                                                    <div className="space-y-3 text-slate-300 text-sm">
+                                                        <div><span className="text-slate-400">Source:</span> Kaggle</div>
+                                                        <div><span className="text-slate-400">Task:</span> {results.analysis?.task || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Data Type:</span> {results.analysis?.data_type || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Domain:</span> {results.analysis?.domain || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Classes:</span> Information unavailable</div>
+                                                        <div><span className="text-slate-400">Dataset Size:</span> {formatBytes(activeDataset.datasetSize)}</div>
+                                                        <div><span className="text-slate-400">License:</span> {activeDataset.license || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">URL:</span> <a href={activeDataset.url} target="_blank" rel="noreferrer" className="text-amber-300 hover:text-amber-200">Open original dataset</a></div>
+                                                    </div>
+                                                    <div className="rounded-3xl bg-[#181616]/90 p-4 text-slate-300">
+                                                        <h4 className="text-sm font-semibold text-white mb-3">Why we recommend it</h4>
+                                                        <p className="text-sm leading-6">This dataset is ranked highly because it aligns with your project's task and data type, includes matching keywords, and has improved metadata signals for relevance.</p>
+                                                        <div className="mt-5 space-y-3">
+                                                            <div><span className="text-slate-400">Recommendation:</span> {activeDataset.relevanceScore ?? 0}% match</div>
+                                                            <div><span className="text-slate-400">Suggested models:</span> {results.analysis?.models?.slice(0, 3).join(', ') || 'Information unavailable'}</div>
+                                                        </div>
+                                                        <div className="mt-6 flex flex-col gap-3">
+                                                            <a
+                                                                href={activeDataset.url}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white text-center hover:brightness-110 transition"
+                                                            >
+                                                                Open Original Dataset
+                                                            </a>
+                                                            <button
+                                                                onClick={() => setSelectedCompare((current) => current.includes(activeDataset.ref) ? current : [...current, activeDataset.ref].slice(0, 4))}
+                                                                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 hover:border-white/20 transition"
+                                                            >
+                                                                Add to Comparison
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     ) : null}
