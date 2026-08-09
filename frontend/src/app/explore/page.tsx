@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 
@@ -33,6 +33,7 @@ export default function ExplorePage() {
 
     // Search states
     const [isLoading, setIsLoading] = useState(false);
+    const [showRegistrationPrompt, setShowRegistrationPrompt] = useState(false);
     const [results, setResults] = useState<any>(null);
     const [hasSearched, setHasSearched] = useState(false);
     const [conversationMessage, setConversationMessage] = useState<string | null>(null);
@@ -42,6 +43,9 @@ export default function ExplorePage() {
     const [taskFilters, setTaskFilters] = useState<string[]>([]);
     const [dataTypeFilters, setDataTypeFilters] = useState<string[]>([]);
     const [difficultyFilters, setDifficultyFilters] = useState<string[]>([]);
+
+    const activeRequestRef = useRef<AbortController | null>(null);
+    const latestRequestIdRef = useRef(0);
 
     const summary = results?.summary;
     const feasibility = results?.feasibility;
@@ -107,27 +111,53 @@ export default function ExplorePage() {
 
     const handleSearch = async (submitQuery: string) => {
         if (!submitQuery.trim()) return;
+
+        if (!session?.user) {
+            const searchCount = parseInt(localStorage.getItem('anonymous_search_count') || '0');
+            if (searchCount >= 2) {
+                setShowRegistrationPrompt(true);
+                return;
+            }
+            localStorage.setItem('anonymous_search_count', (searchCount + 1).toString());
+        }
+
+        const requestId = latestRequestIdRef.current + 1;
+        latestRequestIdRef.current = requestId;
+
+        activeRequestRef.current?.abort();
+        const controller = new AbortController();
+        activeRequestRef.current = controller;
+
+        console.log("CURRENT USER PROMPT:", submitQuery);
         setIsLoading(true);
         setHasSearched(true);
         setResults(null);
         setConversationMessage(null);
         setSelectedCompare([]);
         setActiveDataset(null);
+        setSourceFilters(['kaggle', 'huggingface']);
+        setTaskFilters([]);
+        setDataTypeFilters([]);
+        setDifficultyFilters([]);
 
         try {
             const response = await fetch("/api/search", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: submitQuery })
+                body: JSON.stringify({ query: submitQuery }),
+                signal: controller.signal,
             });
 
             if (!response.ok) {
-                console.error("Search failed with status:", response.status);
-                setIsLoading(false);
-                return;
+                throw new Error(`Search failed with status: ${response.status}`);
             }
 
             const data = await response.json();
+
+            if (requestId !== latestRequestIdRef.current || controller.signal.aborted) {
+                return;
+            }
+
             setResults(data);
             if (data?.intent && data.intent !== 'PROJECT_REQUEST') {
                 setConversationMessage(data.message || 'I can help with that. Tell me more about your idea.');
@@ -135,9 +165,13 @@ export default function ExplorePage() {
                 setConversationMessage(null);
             }
         } catch (error) {
-            console.error("Search error:", error);
+            if (requestId === latestRequestIdRef.current && !controller.signal.aborted) {
+                console.error("Search error:", error);
+            }
         } finally {
-            setIsLoading(false);
+            if (requestId === latestRequestIdRef.current && !controller.signal.aborted) {
+                setIsLoading(false);
+            }
         }
     };
 
@@ -671,6 +705,42 @@ export default function ExplorePage() {
                             )}
                         </div>
                     ) : null}
+                </div>
+            )}
+
+            {showRegistrationPrompt && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-3xl bg-[#1c1917] border border-white/10 shadow-2xl p-8 text-center animate-in zoom-in-95 duration-300">
+                        <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-tr from-rose-500/20 to-orange-400/20 flex items-center justify-center text-amber-500 mb-6">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-2xl font-bold text-white mb-3">Free Limit Reached</h3>
+                        <p className="text-slate-400 mb-8">
+                            You've used your two free anonymous searches. Sign in or register an account to unlock unlimited access to AI Dataset Explorer.
+                        </p>
+                        <div className="flex flex-col gap-3">
+                            <Link
+                                href="/signup"
+                                className="w-full rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white hover:brightness-110 transition"
+                            >
+                                Create Free Account
+                            </Link>
+                            <Link
+                                href="/login"
+                                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 hover:border-white/20 transition"
+                            >
+                                Sign in
+                            </Link>
+                            <button
+                                onClick={() => setShowRegistrationPrompt(false)}
+                                className="mt-2 text-xs text-slate-500 hover:text-slate-300 transition"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </main>
