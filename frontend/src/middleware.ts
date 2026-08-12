@@ -11,7 +11,8 @@ const PUBLIC_PATHS = [
   '/login',     // Login page
   '/signup',    // Signup page
   '/explore',   // Explore page (anonymous limit applied client-side)
-  '/api/search' // Search API
+  '/api/search', // Search API
+  '/api/health', // Health checks
 ];
 
 export async function middleware(req: NextRequest) {

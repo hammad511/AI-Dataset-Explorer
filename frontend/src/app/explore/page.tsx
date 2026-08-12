@@ -1,19 +1,37 @@
 "use client";
 
-import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 
 type DatasetItem = {
-    title: string;
-    subtitle?: string;
+    // API response fields (NormalizedDataset)
+    id: string;
+    name: string;
+    title?: string;       // present in fallback datasets
+    subtitle?: string;    // present in fallback datasets
+    description?: string;
     url: string;
-    creatorName: string;
-    ref: string;
-    relevanceScore?: number;
+    creator?: string;
+    creatorName?: string; // legacy alias
+    ref?: string;
+    matchScore?: number;
+    relevanceScore?: number; // legacy alias
+    scoreBreakdown?: {
+        task: number;
+        modality: number;
+        domain: number;
+        subdomain: number;
+        target: number;
+        metadata: number;
+    };
     license?: string;
-    datasetSize?: number;
+    sizeBytes?: number;
+    datasetSize?: number; // legacy alias
     source?: string;
+    matchReason?: string;
+    rejected?: boolean;
+    rejectionReason?: string;
 };
 
 type ModelItem = {
@@ -28,54 +46,70 @@ type ModelItem = {
 
 export default function ExplorePage() {
     const { data: session } = useSession();
-    const [query, setQuery] = useState("");
+    const [searchInput, setSearchInput] = useState("");
+    const [submittedQuery, setSubmittedQuery] = useState("");
+    const [searchId, setSearchId] = useState<string | null>(null);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
 
     // Search states
     const [isLoading, setIsLoading] = useState(false);
-    const [showRegistrationPrompt, setShowRegistrationPrompt] = useState(false);
-    const [results, setResults] = useState<any>(null);
+    const [intent, setIntent] = useState<string | null>(null);
+    const [analysis, setAnalysis] = useState<any>(null);
+    const [recommendationKeywords, setRecommendationKeywords] = useState<string[]>([]);
+    const [kaggleResults, setKaggleResults] = useState<any[]>([]);
+    const [hfModels, setHfModels] = useState<any[]>([]);
+    const [hfDatasets, setHfDatasets] = useState<any[]>([]);
+    const [summary, setSummary] = useState<any>(null);
+    const [feasibility, setFeasibility] = useState<any>(null);
+    const [hardware, setHardware] = useState<any>(null);
     const [hasSearched, setHasSearched] = useState(false);
     const [conversationMessage, setConversationMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const [selectedCompare, setSelectedCompare] = useState<string[]>([]);
     const [activeDataset, setActiveDataset] = useState<DatasetItem | null>(null);
     const [sourceFilters, setSourceFilters] = useState<string[]>(['kaggle', 'huggingface']);
     const [taskFilters, setTaskFilters] = useState<string[]>([]);
     const [dataTypeFilters, setDataTypeFilters] = useState<string[]>([]);
     const [difficultyFilters, setDifficultyFilters] = useState<string[]>([]);
+    const [aiMode, setAiMode] = useState<'LIVE' | 'MOCK' | null>(null);
+    const [aiError, setAiError] = useState<{ type: string; message: string; hint?: string } | null>(null);
+    const [usingFallbackDatasets, setUsingFallbackDatasets] = useState(false);
 
-    const activeRequestRef = useRef<AbortController | null>(null);
-    const latestRequestIdRef = useRef(0);
+    const latestRequestRef = useRef<string>('');
+    const abortControllerRef = useRef<AbortController | null>(null);
 
-    const summary = results?.summary;
-    const feasibility = results?.feasibility;
-    const hardware = results?.hardware;
+    useEffect(() => {
+        return () => {
+            abortControllerRef.current?.abort();
+        };
+    }, []);
+
     const bestDataset = summary?.bestDataset;
     const bestModel = summary?.bestModel;
 
     const compareDatasets = useMemo(() => {
-        if (!results?.results?.kaggle) return [];
-        return results.results.kaggle.filter((item: any) => selectedCompare.includes(item.ref));
-    }, [results, selectedCompare]);
+        if (!kaggleResults) return [];
+        return kaggleResults.filter((item: any) => selectedCompare.includes(item.ref || item.id));
+    }, [kaggleResults, selectedCompare]);
 
     const filteredDatasets = useMemo(() => {
-        if (!results?.results?.kaggle) return [];
-        return results.results.kaggle.filter((item: any) => {
+        if (!kaggleResults) return [];
+        return kaggleResults.filter((item: any) => {
             if (sourceFilters.length && !sourceFilters.includes(item.source || 'kaggle')) return false;
             if (taskFilters.length && item.taskTags && !item.taskTags.some((tag: string) => taskFilters.includes(tag))) return false;
             if (dataTypeFilters.length && item.dataTypeTags && !item.dataTypeTags.some((tag: string) => dataTypeFilters.includes(tag))) return false;
             return true;
         });
-    }, [results, sourceFilters, taskFilters, dataTypeFilters]);
+    }, [kaggleResults, sourceFilters, taskFilters, dataTypeFilters]);
 
     const filteredModels = useMemo(() => {
-        if (!results?.results?.hfModels) return [];
-        return results.results.hfModels.filter((item: any) => {
+        if (!hfModels) return [];
+        return hfModels.filter((item: any) => {
             if (sourceFilters.length && !sourceFilters.includes(item.source || 'huggingface')) return false;
             if (difficultyFilters.length && item.difficulty && !difficultyFilters.includes(item.difficulty)) return false;
             return true;
         });
-    }, [results, sourceFilters, difficultyFilters]);
+    }, [hfModels, sourceFilters, difficultyFilters]);
 
     const toggleFilter = (setter: React.Dispatch<React.SetStateAction<string[]>>, value: string) => {
         setter((current) =>
@@ -89,14 +123,37 @@ export default function ExplorePage() {
         return `${gb < 1 ? (bytes / 1024 / 1024).toFixed(1) : gb.toFixed(1)} ${gb < 1 ? 'MB' : 'GB'}`;
     };
 
+    // Normalise dataset fields — API uses NormalizedDataset shape, fallback data has legacy aliases
+    const dsName = (ds: DatasetItem) => ds.title || ds.name || ds.id || 'Unnamed Dataset';
+    const dsSubtitle = (ds: DatasetItem) => ds.subtitle || ds.description || '';
+    const dsCreator = (ds: DatasetItem) => ds.creator || ds.creatorName || 'Unknown';
+    const dsSize = (ds: DatasetItem) => ds.sizeBytes ?? ds.datasetSize;
+    const dsScore = (ds: DatasetItem) => ds.matchScore ?? ds.relevanceScore ?? 0;
+    const dsBreakdown = (ds: DatasetItem) => ds.scoreBreakdown;
+    const dsRef = (ds: DatasetItem) => ds.ref || ds.id || '';
+
+    const normalizeTaskText = (value: unknown): string => {
+        if (Array.isArray(value)) return value.filter(Boolean).map(String).join(', ');
+        return String(value ?? '').trim();
+    };
+
+    const taskDisplay = normalizeTaskText(analysis?.task || summary?.task || 'project');
+    const projectTitle = analysis?.title || summary?.projectTitle || 'AI Project Analysis';
+    const projectDomain = analysis?.domain || summary?.domain || 'General';
+    const projectSubdomain = analysis?.subdomain || summary?.subdomain || 'General';
+    const projectModality = analysis?.data_modality || analysis?.data_type || summary?.dataType || 'Text';
+    const projectTargetLabels = Array.isArray(analysis?.target_labels) ? analysis.target_labels : [];
+    const projectArchitecture = analysis?.primary_architecture || 'Custom model';
+    const projectTask = taskDisplay || 'N/A';
+
     const recommendationText = bestDataset && bestModel
-        ? `Start with the ${bestDataset.title} dataset and apply ${bestModel.id} as a transfer-learning baseline for your ${results?.analysis?.task?.toLowerCase() || 'project'}. Focus on data preprocessing first to match the model input shape.`
+        ? `Start with the ${bestDataset.title} dataset and apply ${bestModel.id} as a transfer-learning baseline for your ${taskDisplay.toLowerCase() || 'project'}. Focus on data preprocessing first to match the model input shape.`
         : 'Select a project idea to surface the best dataset and model recommendations.';
 
     const roadmapSteps = [
-        { title: 'Define Project', description: `Clarify the goal: ${results?.analysis?.project_title || 'your AI task'}.` },
-        { title: 'Analyze Data', description: `Review the dataset details and ensure the task and modality match ${results?.analysis?.data_type || 'your data type'}.` },
-        { title: 'Prepare Data', description: `Clean, normalize, and organize the input data for ${results?.analysis?.task || 'your task'}.` },
+        { title: 'Define Project', description: `Clarify the goal: ${analysis?.project_title || 'your AI task'}.` },
+        { title: 'Analyze Data', description: `Review the dataset details and ensure the task and modality match ${analysis?.data_type || 'your data type'}.` },
+        { title: 'Prepare Data', description: `Clean, normalize, and organize the input data for ${analysis?.task || 'your task'}.` },
         { title: 'Train Baseline Model', description: `Start with ${bestModel?.id || 'a recommended model'} for initial evaluation.` },
         { title: 'Evaluate & Iterate', description: `Measure performance, tune hyperparameters, and improve the model.` },
         { title: 'Compare Results', description: 'Use dataset and model comparisons to choose the strongest path.' },
@@ -112,64 +169,117 @@ export default function ExplorePage() {
     const handleSearch = async (submitQuery: string) => {
         if (!submitQuery.trim()) return;
 
-        if (!session?.user) {
-            const searchCount = parseInt(localStorage.getItem('anonymous_search_count') || '0');
-            if (searchCount >= 2) {
-                setShowRegistrationPrompt(true);
-                return;
-            }
-            localStorage.setItem('anonymous_search_count', (searchCount + 1).toString());
-        }
+        const requestId = crypto.randomUUID();
+        latestRequestRef.current = requestId;
+        setSearchId(requestId);
+        setSubmittedQuery(submitQuery.trim());
 
-        const requestId = latestRequestIdRef.current + 1;
-        latestRequestIdRef.current = requestId;
-
-        activeRequestRef.current?.abort();
+        abortControllerRef.current?.abort();
         const controller = new AbortController();
-        activeRequestRef.current = controller;
+        abortControllerRef.current = controller;
 
-        console.log("CURRENT USER PROMPT:", submitQuery);
+        console.log("CURRENT QUERY:", submitQuery.trim());
+        console.log("SEARCH ID:", requestId);
+
         setIsLoading(true);
         setHasSearched(true);
-        setResults(null);
+        setIntent(null);
+        setAnalysis(null);
+        setRecommendationKeywords([]);
+        setKaggleResults([]);
+        setHfModels([]);
+        setHfDatasets([]);
+        setSummary(null);
+        setFeasibility(null);
+        setHardware(null);
         setConversationMessage(null);
+        setError(null);
+        setAiError(null);
+        setAiMode(null);
+        setUsingFallbackDatasets(false);
         setSelectedCompare([]);
         setActiveDataset(null);
-        setSourceFilters(['kaggle', 'huggingface']);
-        setTaskFilters([]);
-        setDataTypeFilters([]);
-        setDifficultyFilters([]);
 
         try {
             const response = await fetch("/api/search", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: submitQuery }),
+                body: JSON.stringify({ query: submitQuery.trim(), searchId: requestId }),
+                cache: 'no-store',
                 signal: controller.signal,
             });
 
             if (!response.ok) {
-                throw new Error(`Search failed with status: ${response.status}`);
+                const errorText = await response.text();
+                let errorMessage = 'Search failed. Please try again.';
+                let structuredError: { type: string; message: string; hint?: string } | null = null;
+                try {
+                    const errorJson: any = JSON.parse(errorText);
+                    const errObj = errorJson?.error;
+                    if (errObj && typeof errObj === 'object') {
+                        structuredError = { type: errObj.type ?? 'ERROR', message: errObj.message ?? errorMessage, hint: errObj.hint };
+                        errorMessage = errObj.message || errorMessage;
+                    } else {
+                        errorMessage = errorJson?.message || errorMessage;
+                    }
+                    // Classify by HTTP status
+                    if (response.status === 401) structuredError = { type: 'AUTH_INVALID', message: 'Authentication failed. Check your API key.' };
+                    if (response.status === 403) structuredError = { type: 'PERMISSION_DENIED', message: structuredError?.message ?? 'Permission denied by OpenRouter API. Check your key and model access.', hint: 'Verify your OPENROUTER_API_KEY and selected model.' };
+                    if (response.status === 404) structuredError = { type: 'MODEL_NOT_FOUND', message: structuredError?.message ?? 'Model not found.', hint: 'Set OPENROUTER_MODEL to a valid OpenRouter model.' };
+                    if (response.status === 429) structuredError = { type: 'RATE_LIMITED', message: 'Rate limit exceeded. Please wait and retry.', hint: 'Consider switching to a different API key.' };
+                } catch {
+                    errorMessage = errorText;
+                }
+                console.warn("Search failed with status:", response.status, '→', errorMessage);
+                if (requestId === latestRequestRef.current) {
+                    setError(errorMessage);
+                    setAiError(structuredError);
+                    setIsLoading(false);
+                }
+                return;
             }
 
             const data = await response.json();
 
-            if (requestId !== latestRequestIdRef.current || controller.signal.aborted) {
+            if (requestId !== latestRequestRef.current || controller.signal.aborted) {
+                console.log("Ignoring stale response for earlier request", { requestId, latestRequestId: latestRequestRef.current });
                 return;
             }
 
-            setResults(data);
+            const currentKeywords = data?.recommendationKeywords || data?.analysis?.keywords || [];
+            console.log("GENERATED KEYWORDS:", currentKeywords);
+            console.log("DATASET SEARCH QUERY:", data?.analysis?.dataset_queries || []);
+            console.log("MODEL SEARCH QUERY:", data?.analysis?.model_queries || []);
+
+            setIntent(data?.intent || null);
+            setAnalysis(data?.analysis || null);
+            setAiMode(data?.ai_mode ?? null);
+            setUsingFallbackDatasets(data?.using_fallback_datasets ?? false);
+            setRecommendationKeywords(currentKeywords);
+            setKaggleResults(data?.results?.kaggle || []);
+            setHfModels(data?.results?.hfModels || []);
+            setHfDatasets(data?.results?.hfDatasets || []);
+            setSummary(data?.summary || null);
+            setFeasibility(data?.feasibility || null);
+            setHardware(data?.hardware || null);
+
             if (data?.intent && data.intent !== 'PROJECT_REQUEST') {
                 setConversationMessage(data.message || 'I can help with that. Tell me more about your idea.');
             } else {
                 setConversationMessage(null);
             }
         } catch (error) {
-            if (requestId === latestRequestIdRef.current && !controller.signal.aborted) {
-                console.error("Search error:", error);
+            if (controller.signal.aborted) {
+                console.log("Request aborted because a newer Explore request started", { requestId });
+                return;
+            }
+            console.warn("Search error:", error);
+            if (requestId === latestRequestRef.current) {
+                setError('Search failed. Please try again.');
+                setIsLoading(false);
             }
         } finally {
-            if (requestId === latestRequestIdRef.current && !controller.signal.aborted) {
+            if (requestId === latestRequestRef.current && !controller.signal.aborted) {
                 setIsLoading(false);
             }
         }
@@ -253,7 +363,7 @@ export default function ExplorePage() {
                         className="relative flex items-center bg-[#1c1917]/90 backdrop-blur-xl border border-white/10 rounded-3xl p-2 shadow-2xl transition hover:border-white/20"
                         onSubmit={(e) => {
                             e.preventDefault();
-                            handleSearch(query);
+                            handleSearch(searchInput);
                         }}
                     >
                         <div className="pl-6 pr-4 text-slate-400 pointer-events-none">
@@ -273,9 +383,9 @@ export default function ExplorePage() {
                             type="text"
                             className="w-full bg-transparent text-lg text-slate-200 placeholder-slate-500 outline-none py-4 px-2"
                             placeholder="I want to detect brain tumors from MRI images using deep learning..."
-                            value={query}
+                            value={searchInput}
                             disabled={isLoading}
-                            onChange={(e) => setQuery(e.target.value)}
+                            onChange={(e) => setSearchInput(e.target.value)}
                         />
 
                         <button
@@ -299,7 +409,7 @@ export default function ExplorePage() {
                             <button
                                 key={i}
                                 onClick={() => {
-                                    setQuery(suggestion);
+                                    setSearchInput(suggestion);
                                     handleSearch(suggestion);
                                 }}
                                 className="text-sm px-4 py-2 rounded-full border border-white/5 bg-white/[0.02] text-slate-300 hover:text-white hover:bg-white/[0.06] hover:border-white/10 transition"
@@ -314,9 +424,33 @@ export default function ExplorePage() {
             {/* Results Area */}
             {hasSearched && (
                 <div className="w-full max-w-6xl mt-12 mb-20 animate-in fade-in slide-in-from-bottom-5 duration-700">
+                    {/* AI Mode Banner */}
+                    {aiMode && (
+                        <div className={`mb-4 inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold border ${aiMode === 'MOCK'
+                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                            : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                            }`}>
+                            <span className={`w-2 h-2 rounded-full animate-pulse ${aiMode === 'MOCK' ? 'bg-amber-400' : 'bg-emerald-400'
+                                }`} />
+                            AI Mode: {aiMode}
+                            {aiMode === 'MOCK' && <span className="ml-1 text-amber-400/70">&bull; Results are simulated. Set USE_MOCK_AI=false with a valid OpenRouter API key for real analysis.</span>}
+                        </div>
+                    )}
+
+                    {usingFallbackDatasets && (
+                        <div className="mb-4 inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold border bg-yellow-500/10 border-yellow-500/30 text-yellow-300">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                            Kaggle credentials not configured — showing illustrative example datasets. Add KAGGLE_USERNAME and KAGGLE_KEY to .env.local for real results.
+                        </div>
+                    )}
+
                     {isLoading ? (
                         <div className="space-y-8">
-                            {/* Gemini Skeleton */}
+                            <div className="rounded-3xl border border-white/10 bg-[#1c1917]/80 p-6">
+                                <p className="text-slate-300 text-lg font-medium">Analyzing your project...</p>
+                                <p className="text-slate-500 text-sm mt-2">Finding relevant datasets and models for your current query.</p>
+                            </div>
+                            {/* OpenRouter Skeleton */}
                             <div className="w-full p-6 bg-white/[0.02] border border-white/10 rounded-3xl animate-pulse">
                                 <div className="h-6 bg-white/10 rounded w-1/4 mb-4"></div>
                                 <div className="space-y-3">
@@ -342,16 +476,53 @@ export default function ExplorePage() {
                                 </div>
                             </div>
                         </div>
-                    ) : results ? (
+                    ) : error ? (
+                        <div className="rounded-3xl border border-rose-500/30 bg-rose-500/10 p-8 animate-in fade-in zoom-in-95">
+                            <div className="flex items-start gap-4">
+                                <div className="text-3xl mt-1">⚠️</div>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <h3 className="text-xl font-semibold text-rose-400">Search failed</h3>
+                                        {aiError?.type && (
+                                            <span className="text-xs font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/20">
+                                                {aiError.type}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-slate-300 mb-3">{aiError?.message || error}</p>
+                                    {aiError?.hint && (
+                                        <p className="text-sm text-slate-400 bg-white/5 border border-white/10 rounded-xl px-4 py-2">
+                                            💡 {aiError.hint}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="mt-6 flex gap-3">
+                                <button
+                                    onClick={() => handleSearch(submittedQuery)}
+                                    className="flex-1 py-3 rounded-2xl font-semibold bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30 transition"
+                                >
+                                    Try Again
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleSearch(submittedQuery)}
+                                    className="flex-1 py-3 rounded-2xl font-semibold bg-white/5 text-slate-300 hover:bg-white/10 border border-white/10 transition text-center"
+                                >
+                                    Retry Search
+                                </button>
+                            </div>
+                        </div>
+                    ) : analysis || intent ? (
                         <div className="space-y-8 text-left">
-                            {results.intent && results.intent !== 'PROJECT_REQUEST' ? (
+                            {intent && intent !== 'PROJECT_REQUEST' ? (
                                 <div className="rounded-3xl border border-white/10 bg-[#1c1917]/80 p-8 text-center text-slate-200">
                                     <h3 className="text-2xl font-semibold text-white mb-3">{conversationMessage || 'I can help with that.'}</h3>
                                     <p className="text-slate-400">Share your AI/ML idea or problem statement, and I’ll suggest datasets, models, preprocessing steps, and a roadmap.</p>
                                 </div>
                             ) : (
                                 <>
-                                    {/* Gemini Analysis Panel */}
+                                    {/* OpenRouter Analysis Panel */}
                                     <div className="relative group overflow-hidden rounded-3xl">
                                         <div className="absolute inset-0 bg-gradient-to-r from-rose-500/10 via-orange-500/10 to-amber-500/10 opacity-50 group-hover:opacity-100 transition duration-500"></div>
                                         <div className="relative bg-[#1c1917]/80 backdrop-blur-md border border-amber-500/30 p-8">
@@ -362,30 +533,53 @@ export default function ExplorePage() {
                                                 <h3 className="text-xl font-semibold text-white">AI Project Analysis</h3>
                                             </div>
                                             <div className="text-slate-300 text-lg leading-relaxed mb-6">
-                                                {typeof results.analysis === 'string' ? (
-                                                    <p>{results.analysis}</p>
-                                                ) : results.analysis ? (
+                                                {typeof analysis === 'string' ? (
+                                                    <p>{analysis}</p>
+                                                ) : analysis ? (
                                                     <div className="grid grid-cols-2 gap-4">
-                                                        <div><strong className="text-amber-200">Title:</strong> {results.analysis.project_title || 'N/A'}</div>
-                                                        <div><strong className="text-amber-200">Domain:</strong> {results.analysis.domain || 'N/A'}</div>
-                                                        <div><strong className="text-amber-200">Task:</strong> {results.analysis.task || 'N/A'}</div>
-                                                        {results.analysis.secondary_task && (
-                                                            <div><strong className="text-amber-200">Secondary Task:</strong> {results.analysis.secondary_task}</div>
+                                                        <div><strong className="text-amber-200">Title:</strong> {projectTitle}</div>
+                                                        <div><strong className="text-amber-200">Domain:</strong> {projectDomain} / {projectSubdomain}</div>
+                                                        <div><strong className="text-amber-200">Task:</strong> {projectTask}</div>
+                                                        {analysis.secondary_tasks?.length > 0 && (
+                                                            <div><strong className="text-amber-200">Secondary Tasks:</strong> {analysis.secondary_tasks.join(', ')}</div>
                                                         )}
-                                                        <div><strong className="text-amber-200">Data Type:</strong> {results.analysis.data_type || 'N/A'}</div>
-                                                        {results.analysis.models?.length > 0 && (
-                                                            <div className="col-span-2"><strong className="text-amber-200">Suggested Architecture:</strong> {results.analysis.models.join(", ")}</div>
+                                                        <div><strong className="text-amber-200">Data Modality:</strong> {projectModality}</div>
+                                                        <div><strong className="text-amber-200">Target Type:</strong> {analysis.target_type || 'N/A'}</div>
+                                                        <div><strong className="text-amber-200">Target Labels:</strong> {projectTargetLabels.join(', ') || 'N/A'}</div>
+                                                        <div className="col-span-2"><strong className="text-amber-200">Expected Output:</strong> {analysis.expected_output || 'N/A'}</div>
+                                                        {projectArchitecture && (
+                                                            <div className="col-span-2"><strong className="text-amber-200">Primary Architecture:</strong> {projectArchitecture}</div>
                                                         )}
+                                                        {analysis.alternative_architectures?.length > 0 && (
+                                                            <div className="col-span-2"><strong className="text-amber-200">Alternative Architectures:</strong> {analysis.alternative_architectures.join(', ')}</div>
+                                                        )}
+
+                                                        <div className="col-span-2 mt-3 space-y-3">
+                                                            <div className="rounded-xl bg-black/10 p-4 border border-emerald-500/20">
+                                                                <div className="flex items-center gap-2 text-amber-100 font-semibold mb-1 text-sm">
+                                                                    Confidence Score: <span className="text-emerald-400">{analysis.confidence?.score ?? analysis.confidence_score ?? 'N/A'}%</span>
+                                                                </div>
+                                                                <p className="text-sm text-slate-300 leading-relaxed">{analysis.confidence?.reason || analysis.confidence_reason || analysis.architecture_reason || 'No confidence explanation provided.'}</p>
+                                                            </div>
+                                                            {analysis.ambiguity_notes?.length > 0 && (
+                                                                <div className="rounded-xl bg-rose-950/20 p-4 border border-rose-500/20">
+                                                                    <div className="text-rose-300 font-semibold mb-1 text-sm">Ambiguity / Warnings</div>
+                                                                    <ul className="text-sm text-rose-200/80 leading-relaxed list-disc list-inside">
+                                                                        {analysis.ambiguity_notes.map((note: string, i: number) => <li key={i}>{note}</li>)}
+                                                                    </ul>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <p>Project analysis is unavailable for this search.</p>
                                                 )}
                                             </div>
 
-                                            {((results.analysis?.keywords?.length ?? 0) > 0 || (results.recommendationKeywords?.length ?? 0) > 0) && (
+                                            {((analysis?.keywords?.length ?? 0) > 0 || recommendationKeywords.length > 0) && (
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span className="text-sm text-slate-500 mr-2">Keywords suggested:</span>
-                                                    {(results.analysis?.keywords || results.recommendationKeywords || []).map((tag: string, i: number) => (
+                                                    {(analysis?.keywords || recommendationKeywords || []).map((tag: string, i: number) => (
                                                         <span key={i} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs text-amber-200">
                                                             {tag}
                                                         </span>
@@ -399,12 +593,12 @@ export default function ExplorePage() {
                                         <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
                                             <h3 className="text-lg font-semibold text-white mb-4">Project Summary</h3>
                                             <div className="space-y-3 text-slate-300 text-sm">
-                                                <div><span className="text-slate-400">Project:</span> <span className="text-white">{summary?.projectTitle || results.analysis?.project_title}</span></div>
-                                                <div><span className="text-slate-400">Domain:</span> <span className="text-white">{summary?.domain || results.analysis?.domain}</span></div>
-                                                <div><span className="text-slate-400">Task:</span> <span className="text-white">{summary?.task || `${results.analysis?.task || 'N/A'}${results.analysis?.secondary_task ? ` + ${results.analysis.secondary_task}` : ''}`}</span></div>
-                                                <div><span className="text-slate-400">Data:</span> <span className="text-white">{summary?.dataType || results.analysis?.data_type || 'N/A'}</span></div>
-                                                <div><span className="text-slate-400">Datasets found:</span> <span className="text-white">{summary?.datasetsFound ?? results.results?.kaggle?.length ?? 0}</span></div>
-                                                <div><span className="text-slate-400">Models found:</span> <span className="text-white">{summary?.modelsFound ?? results.results?.hfModels?.length ?? 0}</span></div>
+                                                <div><span className="text-slate-400">Project:</span> <span className="text-white">{summary?.projectTitle || projectTitle}</span></div>
+                                                <div><span className="text-slate-400">Domain:</span> <span className="text-white">{summary?.domain || projectDomain}</span></div>
+                                                <div><span className="text-slate-400">Task:</span> <span className="text-white">{summary?.task || projectTask}</span></div>
+                                                <div><span className="text-slate-400">Data:</span> <span className="text-white">{summary?.dataType || projectModality}</span></div>
+                                                <div><span className="text-slate-400">Datasets found:</span> <span className="text-white">{summary?.datasetsFound ?? kaggleResults.length ?? 0}</span></div>
+                                                <div><span className="text-slate-400">Models found:</span> <span className="text-white">{summary?.modelsFound ?? hfModels.length ?? 0}</span></div>
                                             </div>
                                         </div>
 
@@ -414,20 +608,30 @@ export default function ExplorePage() {
                                                     <h3 className="text-2xl font-semibold text-white">🏆 Best Dataset for Your Project</h3>
                                                     <p className="text-sm text-slate-400 mt-1">Recommended from Kaggle based on relevance, task match, and metadata.</p>
                                                 </div>
-                                                <span className="text-sm font-semibold text-emerald-300">{bestDataset?.relevanceScore ?? 0}% Match</span>
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-sm font-semibold text-emerald-300">{bestDataset ? dsScore(bestDataset) : 0}% Match</span>
+                                                    {bestDataset && dsBreakdown(bestDataset) && (
+                                                        <div className="text-xs text-slate-400 font-mono mt-1 text-right">
+                                                            Task:{dsBreakdown(bestDataset)!.task}/30 Modality:{dsBreakdown(bestDataset)!.modality}/20 Dom:{dsBreakdown(bestDataset)!.domain}/20 Sub:{dsBreakdown(bestDataset)!.subdomain}/15 Tgt:{dsBreakdown(bestDataset)!.target}/10
+                                                        </div>
+                                                    )}
+                                                    {bestDataset?.matchReason && (
+                                                        <div className="text-xs text-slate-300 mt-1">{bestDataset.matchReason}</div>
+                                                    )}
+                                                </div>
                                             </div>
                                             {bestDataset ? (
                                                 <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                                                     <div className="space-y-2">
-                                                        <h4 className="text-xl font-semibold text-slate-100">{bestDataset.title}</h4>
-                                                        <p className="text-slate-400 text-sm">{bestDataset.subtitle || 'Dataset details unavailable'}</p>
+                                                        <h4 className="text-xl font-semibold text-slate-100">{dsName(bestDataset)}</h4>
+                                                        <p className="text-slate-400 text-sm">{dsSubtitle(bestDataset) || 'Dataset details unavailable'}</p>
                                                         <div className="grid gap-3 sm:grid-cols-2 mt-3 text-sm text-slate-300">
                                                             <div><span className="text-slate-400">Source:</span> Kaggle</div>
                                                             <div><span className="text-slate-400">License:</span> {bestDataset.license || 'Information unavailable'}</div>
-                                                            <div><span className="text-slate-400">Creator:</span> {bestDataset.creatorName || 'Unknown'}</div>
-                                                            <div><span className="text-slate-400">Size:</span> {formatBytes(bestDataset.datasetSize)}</div>
+                                                            <div><span className="text-slate-400">Creator:</span> {dsCreator(bestDataset)}</div>
+                                                            <div><span className="text-slate-400">Size:</span> {formatBytes(dsSize(bestDataset))}</div>
                                                         </div>
-                                                        <p className="text-slate-400 text-sm mt-3">This dataset closely matches your project because it includes relevant keywords, task-aligned metadata, and dataset attributes aligned to your {results.analysis?.task?.toLowerCase() || 'project'}.</p>
+                                                        <p className="text-slate-400 text-sm mt-3">This dataset closely matches your project because it includes relevant keywords, task-aligned metadata, and dataset attributes aligned to your {taskDisplay.toLowerCase() || 'project'}.</p>
                                                     </div>
                                                     <div className="flex flex-col gap-3 sm:items-end">
                                                         <a
@@ -462,36 +666,63 @@ export default function ExplorePage() {
                                             </div>
 
                                             <div className="grid gap-4">
-                                                {results.results?.kaggle?.length > 0 ? (
-                                                    results.results.kaggle.map((ds: any, idx: number) => (
-                                                        <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 transition hover:border-[#20BEFF]/40">
+                                                {kaggleResults.length > 0 ? (
+                                                    kaggleResults.slice(0, 3).map((ds: any, idx: number) => (
+                                                        <div key={idx} className={`p-5 rounded-3xl bg-[#1c1917]/55 border transition ${ds.rejected ? 'border-rose-500/20 opacity-75' : 'border-white/10 hover:border-[#20BEFF]/40'}`}>
                                                             <div className="flex items-start justify-between gap-4">
                                                                 <div>
-                                                                    <h4 className="text-lg font-semibold text-white mb-1 truncate">{ds.title || ds.ref}</h4>
-                                                                    <p className="text-slate-400 text-sm line-clamp-2">{ds.subtitle || 'No subtitle available'}</p>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <h4 className={`text-lg font-semibold mb-1 truncate ${ds.rejected ? 'text-rose-200/70 line-through' : 'text-white'}`}>{dsName(ds)}</h4>
+                                                                        {ds.rejected && (
+                                                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/20 tracking-wider">REJECTED</span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className={`text-sm line-clamp-2 ${ds.rejected ? 'text-rose-200/50' : 'text-slate-400'}`}>{dsSubtitle(ds) || 'No subtitle available'}</p>
                                                                 </div>
-                                                                <label className="flex items-center gap-2 text-sm text-slate-300">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={selectedCompare.includes(ds.ref)}
-                                                                        onChange={() => toggleCompare(ds.ref)}
-                                                                        className="h-4 w-4 rounded border-white/10 bg-slate-900 text-amber-300"
-                                                                    />
-                                                                    Compare
-                                                                </label>
+                                                                {!ds.rejected && (
+                                                                    <label className="flex items-center gap-2 text-sm text-slate-300 whitespace-nowrap">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedCompare.includes(dsRef(ds))}
+                                                                            onChange={() => toggleCompare(dsRef(ds))}
+                                                                            className="h-4 w-4 rounded border-white/10 bg-slate-900 text-amber-300"
+                                                                        />
+                                                                        Compare
+                                                                    </label>
+                                                                )}
                                                             </div>
-                                                            <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
-                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.relevanceScore ?? 0}% match</span>
-                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.source || 'Kaggle'}</span>
-                                                                <span className="px-2 py-1 rounded-full bg-white/5">{formatBytes(ds.datasetSize)}</span>
-                                                                <span className="px-2 py-1 rounded-full bg-white/5">{ds.license || 'License unavailable'}</span>
-                                                            </div>
+
+                                                            {ds.rejected ? (
+                                                                <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                                                                    <p className="text-xs text-rose-300"><span className="font-semibold uppercase tracking-wide text-[10px] mr-1">Mismatch:</span> {ds.rejection_reason || 'Incompatible dataset for project criteria.'}</p>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+                                                                        <span className="px-2 py-1 rounded-full bg-emerald-500/20 font-semibold text-emerald-400">{dsScore(ds)}% match</span>
+                                                                        <span className="px-2 py-1 rounded-full bg-white/5">{ds.source || 'Kaggle'}</span>
+                                                                        <span className="px-2 py-1 rounded-full bg-white/5">{formatBytes(dsSize(ds))}</span>
+                                                                        <span className="px-2 py-1 rounded-full bg-white/5">{ds.license || 'License unavailable'}</span>
+                                                                    </div>
+                                                                    {dsBreakdown(ds) && (
+                                                                        <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-[10px] uppercase font-mono tracking-wider text-slate-500">
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Task<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.task}/30</span></div>
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Mod<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.modality}/20</span></div>
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Dom<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.domain}/20</span></div>
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Sub<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.subdomain}/15</span></div>
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Tgt<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.target}/10</span></div>
+                                                                            <div className="bg-black/20 p-1 rounded border border-white/5">Meta<span className="block text-slate-300 font-bold">{dsBreakdown(ds)!.metadata}/5</span></div>
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            )}
+
                                                             <div className="mt-4 flex flex-wrap gap-3">
                                                                 <a
                                                                     href={ds.url}
                                                                     target="_blank"
                                                                     rel="noreferrer"
-                                                                    className="rounded-2xl bg-[#20BEFF]/10 px-4 py-2 text-sm text-[#20BEFF] hover:bg-[#20BEFF]/15 transition"
+                                                                    className={`rounded-2xl ${ds.rejected ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20' : 'bg-[#20BEFF]/10 text-[#20BEFF] hover:bg-[#20BEFF]/15'} px-4 py-2 text-sm transition`}
                                                                 >
                                                                     View Dataset →
                                                                 </a>
@@ -521,8 +752,8 @@ export default function ExplorePage() {
                                             </div>
 
                                             <div className="space-y-4">
-                                                {results.results?.hfModels?.length > 0 ? (
-                                                    results.results.hfModels.slice(0, 6).map((md: any, idx: number) => (
+                                                {hfModels.length > 0 ? (
+                                                    hfModels.slice(0, 3).map((md: any, idx: number) => (
                                                         <div key={idx} className="p-5 rounded-3xl bg-[#1c1917]/55 border border-white/10 hover:border-[#FFD21E]/40 transition">
                                                             <div className="flex items-center justify-between gap-4">
                                                                 <div>
@@ -554,7 +785,7 @@ export default function ExplorePage() {
                                                 )}
                                             </div>
 
-                                            {results.results?.hfModels?.length > 0 && (
+                                            {hfModels.length > 0 && (
                                                 <div className="mt-6 rounded-3xl border border-white/10 bg-[#1c1917]/80 p-5">
                                                     <h4 className="text-base font-semibold text-slate-100 mb-3">Model comparison</h4>
                                                     <div className="overflow-x-auto">
@@ -569,7 +800,7 @@ export default function ExplorePage() {
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                {results.results.hfModels.slice(0, 4).map((md: any) => (
+                                                                {hfModels.slice(0, 4).map((md: any) => (
                                                                     <tr key={md.id} className="border-t border-white/5">
                                                                         <td className="py-3 pr-4 text-slate-100">{md.id}</td>
                                                                         <td className="py-3 pr-4">{md.pipeline || 'Unknown'}</td>
@@ -600,16 +831,22 @@ export default function ExplorePage() {
                                                         <tr>
                                                             <th className="pb-3 pr-4">Feature</th>
                                                             {compareDatasets.map((ds) => (
-                                                                <th key={ds.ref} className="pb-3 pr-4">{ds.title}</th>
+                                                                <th key={dsRef(ds)} className="pb-3 pr-4">{dsName(ds)}</th>
                                                             ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {['subtitle', 'license', 'datasetSize', 'creatorName', 'relevanceScore'].map((field) => (
+                                                        {(['subtitle', 'license', 'sizeBytes', 'creator', 'matchScore'] as const).map((field) => (
                                                             <tr key={field} className="border-t border-white/5">
-                                                                <td className="py-3 pr-4 text-slate-400 capitalize">{field === 'datasetSize' ? 'Size' : field === 'relevanceScore' ? 'Match' : field === 'creatorName' ? 'Creator' : field}</td>
+                                                                <td className="py-3 pr-4 text-slate-400 capitalize">{field === 'sizeBytes' ? 'Size' : field === 'matchScore' ? 'Match' : field === 'creator' ? 'Creator' : field}</td>
                                                                 {compareDatasets.map((ds) => (
-                                                                    <td key={ds.ref + field} className="py-3 pr-4">{field === 'datasetSize' ? formatBytes(ds.datasetSize) : field === 'relevanceScore' ? `${ds.relevanceScore ?? 0}%` : ds[field] || 'Information unavailable'}</td>
+                                                                    <td key={dsRef(ds) + field} className="py-3 pr-4">
+                                                                        {field === 'sizeBytes' ? formatBytes(dsSize(ds))
+                                                                            : field === 'matchScore' ? `${dsScore(ds)}%`
+                                                                            : field === 'creator' ? dsCreator(ds)
+                                                                            : field === 'subtitle' ? dsSubtitle(ds) || 'Information unavailable'
+                                                                            : (ds[field] as string) || 'Information unavailable'}
+                                                                    </td>
                                                                 ))}
                                                             </tr>
                                                         ))}
@@ -625,12 +862,15 @@ export default function ExplorePage() {
                                             <div className="grid gap-3">
                                                 <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Availability</span><span>{feasibility?.datasetAvailability ?? 'N/A'} / 100</span></div>
                                                 <div className="flex items-center justify-between text-sm text-slate-300"><span>Model Availability</span><span>{feasibility?.modelAvailability ?? 'N/A'} / 100</span></div>
-                                                <div className="flex items-center justify-between text-sm text-slate-300"><span>Computational Difficulty</span><span>{feasibility?.computationalDifficulty ?? 'N/A'} / 100</span></div>
+                                                <div className="flex items-center justify-between text-sm text-slate-300">
+                                                    <span>Computational Feasibility <span className="text-slate-500 text-xs">(higher = easier)</span></span>
+                                                    <span>{feasibility?.computationalFeasibility ?? (feasibility as any)?.computationalDifficulty ?? 'N/A'} / 100</span>
+                                                </div>
                                                 <div className="flex items-center justify-between text-sm text-slate-300"><span>Documentation</span><span>{feasibility?.documentation ?? 'N/A'} / 100</span></div>
                                                 <div className="flex items-center justify-between text-sm text-slate-300"><span>Dataset Quality</span><span>{feasibility?.datasetQuality ?? 'N/A'} / 100</span></div>
                                                 <div className="mt-4 rounded-3xl bg-white/5 p-4 text-sm text-slate-300">
-                                                    <div className="font-semibold text-white text-lg">Overall {feasibility?.overall ?? 'N/A'} / 100</div>
-                                                    <p className="mt-2 text-slate-400">{feasibility?.note}</p>
+                                                    <div className="font-semibold text-white text-lg">Overall {feasibility?.overallScore ?? 'N/A'} / 100</div>
+                                                    <p className="mt-2 text-slate-400">{feasibility?.level}</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -638,9 +878,9 @@ export default function ExplorePage() {
                                         <div className="rounded-3xl bg-[#1c1917]/80 border border-white/10 p-6">
                                             <h3 className="text-xl font-semibold text-white mb-4">Recommended Hardware</h3>
                                             <div className="space-y-4 text-slate-300 text-sm">
-                                                <div><span className="text-slate-400">GPU:</span> <span className="text-white">{hardware?.gpu || 'Estimated'}</span></div>
-                                                <div><span className="text-slate-400">RAM:</span> <span className="text-white">{hardware?.ram || 'Estimated'}</span></div>
-                                                <div><span className="text-slate-400">Storage:</span> <span className="text-white">{hardware?.storage || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">GPU:</span> <span className="text-white">{hardware?.gpu?.recommendedClass || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">RAM:</span> <span className="text-white">{hardware?.ram?.recommended || 'Estimated'}</span></div>
+                                                <div><span className="text-slate-400">Storage:</span> <span className="text-white">{hardware?.storage?.dataset || 'Estimated'} (Work: {hardware?.storage?.workingSpace})</span></div>
                                                 <div><span className="text-slate-400">Difficulty:</span> <span className="text-white">{hardware?.difficulty || 'Estimated'}</span></div>
                                                 <div><span className="text-slate-400">Cloud Alternative:</span> <span className="text-white">{hardware?.cloudAlternative || 'Estimated'}</span></div>
                                             </div>
@@ -652,8 +892,8 @@ export default function ExplorePage() {
                                             <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-[#111010] border border-white/10 shadow-2xl">
                                                 <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-4">
                                                     <div>
-                                                        <h3 className="text-xl font-semibold text-white">{activeDataset.title}</h3>
-                                                        <p className="text-slate-400 text-sm">{activeDataset.subtitle || 'Information unavailable'}</p>
+                                                        <h3 className="text-xl font-semibold text-white">{dsName(activeDataset)}</h3>
+                                                        <p className="text-slate-400 text-sm">{dsSubtitle(activeDataset) || 'Information unavailable'}</p>
                                                     </div>
                                                     <button
                                                         onClick={() => setActiveDataset(null)}
@@ -665,11 +905,11 @@ export default function ExplorePage() {
                                                 <div className="p-6 grid gap-4 lg:grid-cols-2">
                                                     <div className="space-y-3 text-slate-300 text-sm">
                                                         <div><span className="text-slate-400">Source:</span> Kaggle</div>
-                                                        <div><span className="text-slate-400">Task:</span> {results.analysis?.task || 'Information unavailable'}</div>
-                                                        <div><span className="text-slate-400">Data Type:</span> {results.analysis?.data_type || 'Information unavailable'}</div>
-                                                        <div><span className="text-slate-400">Domain:</span> {results.analysis?.domain || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Task:</span> {analysis?.task || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Data Type:</span> {analysis?.data_type || 'Information unavailable'}</div>
+                                                        <div><span className="text-slate-400">Domain:</span> {analysis?.domain || 'Information unavailable'}</div>
                                                         <div><span className="text-slate-400">Classes:</span> Information unavailable</div>
-                                                        <div><span className="text-slate-400">Dataset Size:</span> {formatBytes(activeDataset.datasetSize)}</div>
+                                                        <div><span className="text-slate-400">Dataset Size:</span> {formatBytes(dsSize(activeDataset))}</div>
                                                         <div><span className="text-slate-400">License:</span> {activeDataset.license || 'Information unavailable'}</div>
                                                         <div><span className="text-slate-400">URL:</span> <a href={activeDataset.url} target="_blank" rel="noreferrer" className="text-amber-300 hover:text-amber-200">Open original dataset</a></div>
                                                     </div>
@@ -678,7 +918,7 @@ export default function ExplorePage() {
                                                         <p className="text-sm leading-6">This dataset is ranked highly because it aligns with your project's task and data type, includes matching keywords, and has improved metadata signals for relevance.</p>
                                                         <div className="mt-5 space-y-3">
                                                             <div><span className="text-slate-400">Recommendation:</span> {activeDataset.relevanceScore ?? 0}% match</div>
-                                                            <div><span className="text-slate-400">Suggested models:</span> {results.analysis?.models?.slice(0, 3).join(', ') || 'Information unavailable'}</div>
+                                                            <div><span className="text-slate-400">Suggested models:</span> {analysis?.models?.slice(0, 3).join(', ') || 'Information unavailable'}</div>
                                                         </div>
                                                         <div className="mt-6 flex flex-col gap-3">
                                                             <a
@@ -704,43 +944,8 @@ export default function ExplorePage() {
                                 </>
                             )}
                         </div>
-                    ) : null}
-                </div>
-            )}
-
-            {showRegistrationPrompt && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-                    <div className="w-full max-w-md overflow-hidden rounded-3xl bg-[#1c1917] border border-white/10 shadow-2xl p-8 text-center animate-in zoom-in-95 duration-300">
-                        <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-tr from-rose-500/20 to-orange-400/20 flex items-center justify-center text-amber-500 mb-6">
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                            </svg>
-                        </div>
-                        <h3 className="text-2xl font-bold text-white mb-3">Free Limit Reached</h3>
-                        <p className="text-slate-400 mb-8">
-                            You've used your two free anonymous searches. Sign in or register an account to unlock unlimited access to AI Dataset Explorer.
-                        </p>
-                        <div className="flex flex-col gap-3">
-                            <Link
-                                href="/signup"
-                                className="w-full rounded-2xl bg-gradient-to-r from-rose-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white hover:brightness-110 transition"
-                            >
-                                Create Free Account
-                            </Link>
-                            <Link
-                                href="/login"
-                                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-200 hover:border-white/20 transition"
-                            >
-                                Sign in
-                            </Link>
-                            <button
-                                onClick={() => setShowRegistrationPrompt(false)}
-                                className="mt-2 text-xs text-slate-500 hover:text-slate-300 transition"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
+                    ) : null
+                    }
                 </div>
             )}
         </main>
