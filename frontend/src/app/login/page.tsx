@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { signIn } from 'next-auth/react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 
-export default function LoginPage() {
+function LoginContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const callbackUrl = searchParams?.get('callbackUrl') || '/explore';
@@ -145,5 +145,13 @@ export default function LoginPage() {
                 </p>
             </div>
         </main>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-[#0c0a09]" />}>
+            <LoginContent />
+        </Suspense>
     );
 }

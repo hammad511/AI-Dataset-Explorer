@@ -16,7 +16,7 @@ export function scoreModel(model: Partial<NormalizedModel>, spec: ProjectSpec): 
     const mod = { ...model } as NormalizedModel;
     mod.scoreBreakdown = { task: 0, modality: 0, architecture: 0, benchmark: 0, efficiency: 0, popularity: 0 };
     mod.rejected = false;
-    mod.rejectionReason = undefined;
+    mod.rejectionReason = null;
 
     const taskText = Array.isArray(spec.task) ? spec.task.join(' ') : String(spec.task || '');
     const primaryArchText = String(spec.primary_architecture || '');
@@ -38,6 +38,22 @@ export function scoreModel(model: Partial<NormalizedModel>, spec: ProjectSpec): 
         mod.rejectionReason = 'Vision-only architecture selected for a text/NLP task';
         mod.matchScore = 0;
         return mod;
+    }
+
+    // Name-based domain rejection for vision projects
+    // Rejects models whose name contains clearly irrelevant domain keywords
+    const modelNameLower = String(mod.name || mod.id || '').toLowerCase();
+    const isVisionProject = /(detect|track|segment|classif|count)/.test(specTaskLower) && !isTextProject;
+    if (isVisionProject) {
+        const irrelevant = [/table.?extract/, /anime/, /face.?(detect|recog|swap|generat)/, /stock.?market|trading|finance/, /sentiment|product.?review/, /speech|whisper/, /depth.?estim/, /generat|diffusion|stable.?diff|inpaint/];
+        const projectCtx = String(spec.domain||'').toLowerCase() + ' ' + String(spec.subdomain||'').toLowerCase() + ' ' + specTaskLower;
+        const needsFace = /(face|pedestrian|person|human)/.test(projectCtx);
+        if (!needsFace && irrelevant.some(re => re.test(modelNameLower))) {
+            mod.rejected = true;
+            mod.rejectionReason = 'Model name suggests unrelated domain: ' + modelNameLower.split('/').pop()?.slice(0, 40);
+            mod.matchScore = 0;
+            return mod;
+        }
     }
 
     // Determine task intent categories

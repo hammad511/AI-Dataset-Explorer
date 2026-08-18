@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Debug scripts
+fix_*.js
+test_*.js
+*.log
+server.log
+output*.json
+
+
+# User database — contains bcrypt password hashes, must never be committed
+src/app/api/auth/users.json

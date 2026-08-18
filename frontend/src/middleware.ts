@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { isRateLimited } from '@/lib/rateLimit';
 
 // Secure by default: every route requires auth EXCEPT the public whitelist below.
 // This means any new page you add is automatically protected.
@@ -11,12 +12,24 @@ const PUBLIC_PATHS = [
   '/login',     // Login page
   '/signup',    // Signup page
   '/explore',   // Explore page (anonymous limit applied client-side)
-  '/api/search', // Search API
   '/api/health', // Health checks
 ];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Rate limit the credentials sign-in endpoint specifically
+  if (pathname === '/api/auth/callback/credentials') {
+    const ip =
+      req.headers.get('x-real-ip') ??
+      'unknown';
+    if (isRateLimited('login', ip, 10, 15 * 60 * 1000)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Too many login attempts. Please wait.' }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+  }
 
   // Always allow NextAuth API routes, static files, and next internals
   if (

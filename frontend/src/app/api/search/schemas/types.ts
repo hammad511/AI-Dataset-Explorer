@@ -1,4 +1,4 @@
-import type { ConfidenceBreakdown } from '../ranking/confidenceCalculator';
+import type { ConfidenceBreakdown } from '../services/ranking/confidenceCalculator';
 
 export interface ProjectSpec {
     problem_statement: string;

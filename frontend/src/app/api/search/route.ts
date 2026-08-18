@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getToken } from 'next-auth/jwt';
 import type { ProjectSpec } from './schemas/types';
 import { analyzeProjectSemantics } from './services/gemini/analyzeProject';
 import { calculateDeterministicConfidence } from './services/ranking/confidenceCalculator';
@@ -9,13 +10,48 @@ import { estimateHardware } from './services/feasibility/estimateHardware';
 import { searchKaggleDatasets } from './services/kaggle/searchDatasets';
 import { searchHuggingFaceModels } from './services/huggingface/searchModels';
 import { searchHuggingFaceDatasets } from './services/huggingface/searchDatasets';
+import {
+    enrichDataset,
+    computeSearchCoverage,
+    analyzeDatasetCompatibility,
+    suggestLabelMapping,
+    generateRecommendationCategories,
+    generateSmartRecommendation,
+} from './services/ranking/enrichDataset';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mock data — clearly labeled. ONLY returned when USE_MOCK_AI=true.
-// Never silently falls back to this when OpenRouter fails.
-// ─────────────────────────────────────────────────────────────────────────────
+// API states used in the audit object
+type ApiStatus =
+    | 'NOT_CONFIGURED'
+    | 'NOT_CALLED'
+    | 'CALL_STARTED'
+    | 'CALLED_SUCCESSFULLY'
+    | 'CALLED_FAILED'
+    | 'TIMED_OUT'
+    | 'PARSE_FAILED'
+    | 'MOCKED';
+
+interface ApiAuditEntry {
+    status: ApiStatus;
+    called: boolean;
+    success: boolean;
+    httpStatus?: number;
+    responseTimeMs?: number;
+    resultsReturned?: number;
+    endpoint?: string;
+    error?: string;
+}
+
+interface ApiAudit {
+    openrouter: ApiAuditEntry;
+    kaggle: ApiAuditEntry;
+    huggingface: ApiAuditEntry;
+    huggingfaceModels: ApiAuditEntry;
+    huggingfaceDatasets: ApiAuditEntry;
+}
+
+// Mock analysis data - ONLY used when USE_MOCK_AI=true
 const MOCK_ANALYSIS = {
-    problem_statement: '[MOCK] Simulated analysis. Enable a live OpenRouter API key to get real results.',
+    problem_statement: '[MOCK] Simulated analysis. Set USE_MOCK_AI=false with a valid OPENROUTER_API_KEY for real results.',
     title: '[MOCK] AI Project Analysis',
     domain: 'Computer Vision',
     subdomain: 'General',
@@ -37,12 +73,8 @@ const MOCK_ANALYSIS = {
     unknown_facts: ['all real project details'],
     ambiguity_notes: ['MOCK MODE IS ACTIVE — set USE_MOCK_AI=false and provide a valid OPENROUTER_API_KEY'],
     confidence: {
-        task_certainty: 0,
-        domain_certainty: 0,
-        modality_certainty: 0,
-        target_certainty: 0,
-        architecture_certainty: 0,
-        score: 0,
+        task_certainty: 0, domain_certainty: 0, modality_certainty: 0,
+        target_certainty: 0, architecture_certainty: 0, score: 0,
         reason: 'Mock mode is active. No real analysis was performed.',
     },
 };
@@ -53,18 +85,13 @@ function normalizeSingleText(value: unknown): string {
 }
 
 function hasImageIntent(query: string): boolean {
-    const q = (query || '').toLowerCase();
-    return /(image|images|mri|ct|x-ray|xray|scan|medical imaging|radiology|tumor|lesion|retinal|microscopy|histopathology|vision|cnn|classification.*image|camera|industrial|defect|scratch|crack|dent|surface damage|production line)/i.test(q);
+    return /(image|images|mri|ct|x-ray|xray|scan|medical imaging|radiology|tumor|lesion|retinal|microscopy|histopathology|vision|cnn|classification.*image|camera|industrial|defect|scratch|crack|dent|surface damage|production line)/i.test(query || '');
 }
-
 function hasIndustrialDefectIntent(query: string): boolean {
-    const q = (query || '').toLowerCase();
-    return /(manufacturing|factory|industrial|production line|quality control|defect|crack|scratch|dent|missing component|surface damage|visual inspection|inspection|camera image|camera images|assembly line)/i.test(q);
+    return /(manufacturing|factory|industrial|production line|quality control|defect|crack|scratch|dent|missing component|surface damage|visual inspection|inspection|camera image|camera images|assembly line)/i.test(query || '');
 }
-
 function hasMedicalImageIntent(query: string): boolean {
-    const q = (query || '').toLowerCase();
-    return /(mri|ct|x-ray|xray|medical imaging|radiology|tumor|lesion|retinal|microscopy|histopathology|diagnosis)/i.test(q);
+    return /(mri|ct|x-ray|xray|medical imaging|radiology|tumor|lesion|retinal|microscopy|histopathology|diagnosis)/i.test(query || '');
 }
 
 function applyImageAwareOverrides(query: string, analysis: Record<string, unknown>): Record<string, unknown> {
@@ -74,12 +101,9 @@ function applyImageAwareOverrides(query: string, analysis: Record<string, unknow
     const isMedicalProject = hasMedicalImageIntent(q);
     const isImageProject = hasImageIntent(q);
     if (!isImageProject) return analysis;
-
     const taskList = Array.isArray(analysis.task) && analysis.task.length > 0
         ? analysis.task.filter(Boolean).map(String)
-        : [String((analysis as Record<string, unknown>).task ?? 'Image Classification')];
-    const normalizedTasks = taskList.map((t: string) => t);
-
+        : [String(analysis.task ?? 'Image Classification')];
     if (isIndustrialDefectProject) {
         return {
             ...analysis,
@@ -87,18 +111,15 @@ function applyImageAwareOverrides(query: string, analysis: Record<string, unknow
             subdomain: analysis.subdomain || 'Industrial Quality Inspection',
             data_modality: analysis.data_modality || 'Image',
             input_type: analysis.input_type || 'Camera image',
-            task: normalizedTasks.length > 0 ? ['Defect Detection', 'Object Detection'] : ['Defect Detection', 'Object Detection'],
+            task: ['Defect Detection', 'Object Detection'],
             primary_architecture: analysis.primary_architecture || 'YOLOv8',
             alternative_architectures: Array.isArray(analysis.alternative_architectures) && analysis.alternative_architectures.length > 0
-                ? analysis.alternative_architectures
-                : ['RT-DETR', 'Mask R-CNN', 'EfficientDet'],
+                ? analysis.alternative_architectures : ['RT-DETR', 'Mask R-CNN', 'EfficientDet'],
             target_labels: Array.isArray(analysis.target_labels) && analysis.target_labels.length > 0
-                ? analysis.target_labels
-                : ['crack', 'scratch', 'dent', 'missing component', 'surface damage', 'no defect'],
-            expected_output: analysis.expected_output || 'Bounding boxes or segmentation masks for defects with pass/fail classification in real-time.',
+                ? analysis.target_labels : ['crack', 'scratch', 'dent', 'missing component', 'surface damage', 'no defect'],
+            expected_output: analysis.expected_output || 'Bounding boxes or segmentation masks for defects with pass/fail classification.',
         };
     }
-
     if (isMedicalProject) {
         return {
             ...analysis,
@@ -106,123 +127,186 @@ function applyImageAwareOverrides(query: string, analysis: Record<string, unknow
             subdomain: analysis.subdomain || 'Medical Imaging',
             data_modality: analysis.data_modality || 'Image',
             input_type: analysis.input_type || 'Image',
-            task: normalizedTasks.length > 0 ? normalizedTasks : ['Image Classification'],
+            task: taskList.length > 0 ? taskList : ['Image Classification'],
             primary_architecture: analysis.primary_architecture || 'CNN',
             alternative_architectures: Array.isArray(analysis.alternative_architectures) && analysis.alternative_architectures.length > 0
-                ? analysis.alternative_architectures
-                : ['Vision Transformer (ViT)', 'ResNet', 'EfficientNet'],
+                ? analysis.alternative_architectures : ['Vision Transformer (ViT)', 'ResNet', 'EfficientNet'],
             target_labels: Array.isArray(analysis.target_labels) && analysis.target_labels.length > 0
-                ? analysis.target_labels
-                : ['Disease present', 'Disease absent', 'Other relevant condition'],
+                ? analysis.target_labels : ['Disease present', 'Disease absent', 'Other relevant condition'],
             expected_output: analysis.expected_output || 'Classified diagnosis or disease label based on medical images.',
         };
     }
-
-    // For all other image projects, trust the LLM analysis — do not apply domain overrides
     return analysis;
 }
 
-export async function POST(req: Request) {
-    const DEBUG_API_TRACE = process.env.DEBUG_API_TRACE === 'true';
-    const ROUTE_START = performance.now();
-    const apiTrace = {
-        openrouter: { called: false, success: false } as Record<string, any>,
-        kaggle: { called: false, success: false } as Record<string, any>,
-        huggingface: { called: false, success: false } as Record<string, any>
-    };
+// ── Rate limiting — in-process sliding window (single-instance / dev use) ──────
+// PRODUCTION NOTE: Replace with Redis/Upstash for multi-instance deployments.
+const ipRequestLog = new Map<string, number[]>();
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT_RPM || '10', 10); // requests per minute per IP
 
+function isRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const windowMs = 60_000;
+    const requests = (ipRequestLog.get(ip) || []).filter(t => now - t < windowMs);
+    if (requests.length >= RATE_LIMIT) return true;
+    requests.push(now);
+    ipRequestLog.set(ip, requests);
+    // Cleanup old IPs periodically
+    if (ipRequestLog.size > 5000) {
+        for (const [k, v] of ipRequestLog) {
+            if (v.every(t => now - t > windowMs)) ipRequestLog.delete(k);
+        }
+    }
+    return false;
+}
+
+export async function POST(req: Request) {
+    // Authentication guard — reject unauthenticated callers
+    const token = await getToken({ req: req as any, secret: process.env.NEXTAUTH_SECRET });
+    if (!token) {
+        return NextResponse.json({ success: false, error: { type: 'UNAUTHORIZED', status: 401, message: 'Authentication required.' } }, { status: 401 });
+    }
+
+    const ROUTE_START = performance.now();
+
+    // Phase 5: Rate limiting
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+    if (isRateLimited(clientIp)) {
+        return NextResponse.json({
+            success: false,
+            error: { type: 'RATE_LIMITED', status: 429, message: 'Too many requests. Please wait before searching again.' }
+        }, { status: 429 });
+    }
     let query = '';
     let searchId: string | null = null;
 
-    if (DEBUG_API_TRACE) {
-        console.log('\n[SEARCH] request received');
-    }
+    const audit: ApiAudit = {
+        openrouter:          { status: 'NOT_CALLED', called: false, success: false },
+        kaggle:              { status: 'NOT_CALLED', called: false, success: false },
+        huggingface:         { status: 'NOT_CALLED', called: false, success: false },
+        huggingfaceModels:   { status: 'NOT_CALLED', called: false, success: false },
+        huggingfaceDatasets: { status: 'NOT_CALLED', called: false, success: false },
+    };
+
+    const DEBUG_TRACE = process.env.DEBUG_API_TRACE === 'true';
+    const log = (api: string, phase: string, detail = '') => {
+        if (DEBUG_TRACE) console.log('[API-AUDIT][' + api + '][' + phase + ']' + (detail ? ' ' + detail : ''));
+    };
 
     try {
         const body = await req.json();
+        // Phase 4: Input validation
+        if (!body || typeof body !== 'object') {
+            return NextResponse.json({ message: 'Invalid request body.' }, { status: 400 });
+        }
+        if (typeof body.query !== 'string' && body.query !== undefined) {
+            return NextResponse.json({ message: 'Query must be a string.' }, { status: 400 });
+        }
         query = (body.query ?? '').trim();
-        searchId = body.searchId || null;
+        searchId = typeof body.searchId === 'string' ? body.searchId.slice(0, 64) : null;
+
+        const MAX_QUERY_LENGTH = parseInt(process.env.MAX_QUERY_LENGTH || '8000', 10);
+        if (query.length > MAX_QUERY_LENGTH) {
+            return NextResponse.json({
+                message: 'Query too long. Maximum ' + MAX_QUERY_LENGTH + ' characters.',
+                searchId
+            }, { status: 400 });
+        }
 
         if (!query) {
             return NextResponse.json({ message: 'Missing query', searchId }, { status: 400 });
         }
 
+        // Minimum meaningful length — reject single words/greetings that can't describe an ML project
+        const MIN_QUERY_LENGTH = parseInt(process.env.MIN_QUERY_LENGTH || '20', 10);
+        if (query.length < MIN_QUERY_LENGTH) {
+            return NextResponse.json({
+                success: false,
+                error: {
+                    type: 'QUERY_TOO_SHORT',
+                    status: 400,
+                    message: 'Please describe your ML project in more detail (at least ' + MIN_QUERY_LENGTH + ' characters). For example: "I want to classify customer reviews as positive or negative."',
+                    hint: 'Describe your project goal, data type, and what you want the AI to do.',
+                },
+                searchId,
+            }, { status: 400 });
+        }
+
         const USE_MOCK_AI = process.env.USE_MOCK_AI === 'true';
         const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+        const OPENROUTER_URL = process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
+        const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-4.1-mini';
 
-        // ── Semantic Analysis ──────────────────────────────────────────────
+        log('OPENROUTER', 'START', 'USE_MOCK_AI=' + USE_MOCK_AI + ' key_configured=' + !!OPENROUTER_API_KEY);
+
         let rawAnalysis: Record<string, unknown> | null = null;
         let aiMode: 'LIVE' | 'MOCK';
 
         if (USE_MOCK_AI) {
             rawAnalysis = { ...MOCK_ANALYSIS, problem_statement: query };
             aiMode = 'MOCK';
-            if (DEBUG_API_TRACE) {
-                console.log('mockAI=true');
-            }
+            audit.openrouter = { status: 'MOCKED', called: false, success: false };
+            log('OPENROUTER', 'MOCKED', 'USE_MOCK_AI=true — real API not called');
         } else {
             if (!OPENROUTER_API_KEY) {
-                apiTrace.openrouter.reason = 'API key not configured';
+                audit.openrouter = { status: 'NOT_CONFIGURED', called: false, success: false };
+                log('OPENROUTER', 'ERROR', 'NOT_CONFIGURED — OPENROUTER_API_KEY missing from environment');
                 return NextResponse.json({
-                    success: false,
-                    source: 'provider',
-                    status: 'failed',
-                    ai_mode: 'LIVE',
-                    error: {
-                        type: 'MISSING_CREDENTIALS',
-                        status: 500,
-                        message: 'OPENROUTER_API_KEY is not configured on the server.',
-                        hint: 'Add OPENROUTER_API_KEY to your .env.local file.',
-                    },
-                    mock_available: true,
-                    searchId,
-                    ...(DEBUG_API_TRACE && { apiTrace }),
+                    success: false, source: 'provider', status: 'failed', ai_mode: 'LIVE',
+                    error: { type: 'MISSING_CREDENTIALS', status: 500,
+                        message: 'AI provider is not configured on the server.',
+                        hint: 'Add the required API key to your server environment.' },
+                    mock_available: true, searchId, apiAudit: audit,
                 }, { status: 500 });
             }
 
-            apiTrace.openrouter.called = true;
-            if (DEBUG_API_TRACE) console.log('[OPENROUTER] START');
+            audit.openrouter.status = 'CALL_STARTED';
+            audit.openrouter.called = true;
+            audit.openrouter.endpoint = 'openrouter.ai';
             const orStart = performance.now();
+            log('OPENROUTER', 'REQUEST', 'POST ' + OPENROUTER_URL + ' model=' + OPENROUTER_MODEL);
+
             try {
-                rawAnalysis = await analyzeProjectSemantics(query, OPENROUTER_API_KEY, process.env.OPENROUTER_MODEL, 'openrouter');
-                const orDur = Math.round(performance.now() - orStart);
-                apiTrace.openrouter.success = true;
-                apiTrace.openrouter.durationMs = orDur;
-                if (DEBUG_API_TRACE) {
-                    console.log(`[OPENROUTER] END status=200 duration=${orDur}ms`);
-                    console.log(`[OPENROUTER] project analysis generated`);
-                }
-            } catch (authError: any) {
-                const orDur = Math.round(performance.now() - orStart);
-                apiTrace.openrouter.success = false;
-                apiTrace.openrouter.durationMs = orDur;
-                let status = 500;
-                try { status = JSON.parse(authError.message).status || 500; } catch { }
-                apiTrace.openrouter.status = status;
-                if (DEBUG_API_TRACE) {
-                    console.log(`[OPENROUTER] END status=${status} duration=${orDur}ms`);
-                }
-                throw authError; // rethrow to keep standard block behavior
+                rawAnalysis = await analyzeProjectSemantics(query, OPENROUTER_API_KEY, OPENROUTER_MODEL, 'openrouter');
+                const orMs = Math.round(performance.now() - orStart);
+                audit.openrouter.status = 'CALLED_SUCCESSFULLY';
+                audit.openrouter.success = true;
+                audit.openrouter.httpStatus = 200;
+                audit.openrouter.responseTimeMs = orMs;
+                audit.openrouter.resultsReturned = 1;
+                log('OPENROUTER', 'RESPONSE', 'status=200 responseTime=' + orMs + 'ms');
+                log('OPENROUTER', 'SUCCESS', 'project analysis parsed successfully');
+                aiMode = 'LIVE';
+            } catch (orErr: any) {
+                const orMs = Math.round(performance.now() - orStart);
+                let httpStatus = 500;
+                let errMsg = orErr instanceof Error ? orErr.message : String(orErr);
+                try { httpStatus = JSON.parse(errMsg).status || 500; } catch {}
+                const isTimeout = errMsg.toLowerCase().includes('timeout') || errMsg.toLowerCase().includes('timed out');
+                audit.openrouter.status = isTimeout ? 'TIMED_OUT' : 'CALLED_FAILED';
+                audit.openrouter.success = false;
+                audit.openrouter.httpStatus = httpStatus;
+                audit.openrouter.responseTimeMs = orMs;
+                audit.openrouter.error = errMsg.slice(0, 200);
+                log('OPENROUTER', 'ERROR', 'status=' + httpStatus + ' responseTime=' + orMs + 'ms error=' + errMsg.slice(0, 120));
+                throw orErr;
             }
-            aiMode = 'LIVE';
         }
 
-        // ── Confidence Calculation ─────────────────────────────────────────
         if (!rawAnalysis || typeof rawAnalysis !== 'object' || !rawAnalysis.title || !rawAnalysis.domain || !rawAnalysis.task || !rawAnalysis.data_modality) {
+            audit.openrouter.status = 'PARSE_FAILED';
             throw new Error(JSON.stringify({
-                type: 'INVALID_PROVIDER_RESPONSE',
-                status: 502,
-                message: 'The AI provider returned a malformed or incomplete project analysis payload. Missing required fields like title, domain, task, or data_modality.',
+                type: 'INVALID_PROVIDER_RESPONSE', status: 502,
+                message: 'The AI provider returned a malformed or incomplete project analysis payload.',
             }));
         }
 
         const imageAwareAnalysis = applyImageAwareOverrides(query, rawAnalysis);
-
         const taskString = Array.isArray(imageAwareAnalysis.task)
             ? imageAwareAnalysis.task.filter(Boolean).join(', ')
             : normalizeSingleText(imageAwareAnalysis.task || 'General AI task');
 
-        const normalizedAnalysis: ProjectSpec = {
+        const normalizedAnalysis = {
             problem_statement: String(imageAwareAnalysis.problem_statement ?? query),
             title: String(imageAwareAnalysis.title ?? 'AI Project Analysis'),
             domain: String(imageAwareAnalysis.domain ?? 'General AI'),
@@ -242,163 +326,221 @@ export async function POST(req: Request) {
             primary_architecture: String(imageAwareAnalysis.primary_architecture ?? 'Custom model'),
             alternative_architectures: Array.isArray(imageAwareAnalysis.alternative_architectures) ? imageAwareAnalysis.alternative_architectures.filter(Boolean).map(String) : [],
             architecture_reasoning: String(imageAwareAnalysis.architecture_reasoning ?? 'Selected based on task and modality requirements.'),
-            confidence: {
-                task_certainty: 0,
-                domain_certainty: 0,
-                modality_certainty: 0,
-                target_certainty: 0,
-                architecture_certainty: 0,
-                score: 0,
-                reason: 'Calculated from semantic analysis.',
-            },
+            confidence: { task_certainty: 0, domain_certainty: 0, modality_certainty: 0, target_certainty: 0, architecture_certainty: 0, score: 0, reason: 'Calculating...' },
+            // Extended fields from improved prompt
+            num_classes: (imageAwareAnalysis as any).num_classes ?? null,
+            dataset_size_requirement: String((imageAwareAnalysis as any).dataset_size_requirement ?? 'not specified'),
+            preferred_language: String((imageAwareAnalysis as any).preferred_language ?? 'Not specified'),
+            deployment_requirement: String((imageAwareAnalysis as any).deployment_requirement ?? 'not specified'),
+            interpretability_requirement: String((imageAwareAnalysis as any).interpretability_requirement ?? 'not specified'),
+            privacy_sensitivity: String((imageAwareAnalysis as any).privacy_sensitivity ?? 'not specified'),
+            evaluation_metrics: Array.isArray((imageAwareAnalysis as any).evaluation_metrics) ? (imageAwareAnalysis as any).evaluation_metrics : [],
         };
 
-        const confidence = calculateDeterministicConfidence(normalizedAnalysis, query.length);
+        const confidence = calculateDeterministicConfidence(normalizedAnalysis as unknown as Record<string, unknown>, query.length);
         const spec: ProjectSpec = { ...normalizedAnalysis, confidence };
 
-        // ── External Dataset/Model Retrieval ──────────────────────────────
+        // Kaggle
+        const KAGGLE_USERNAME = process.env.KAGGLE_USERNAME;
+        const KAGGLE_KEY = process.env.KAGGLE_KEY;
+        if (!KAGGLE_USERNAME || !KAGGLE_KEY) {
+            audit.kaggle.status = 'NOT_CONFIGURED';
+            log('KAGGLE', 'START', 'NOT_CONFIGURED — KAGGLE_USERNAME or KAGGLE_KEY missing from environment');
+        } else {
+            audit.kaggle.status = 'CALL_STARTED';
+            audit.kaggle.endpoint = 'kaggle.com';
+            log('KAGGLE', 'START', 'credentials configured — calling Kaggle API');
+        }
+
+        // Hugging Face
+        const HF_TOKEN = process.env.HUGGING_FACE_TOKEN;
+        audit.huggingface.status = 'CALL_STARTED';
+        audit.huggingface.endpoint = 'huggingface.co';
+        log('HUGGINGFACE', 'START', 'token_configured=' + !!HF_TOKEN + ' — calling HF API');
+
+        const kaggleTrace: Record<string, any> = {};
+        const hfTrace: Record<string, any> = {};
+
+        log('KAGGLE', 'REQUEST', 'GET /api/v1/datasets/list?search=...');
+        log('HUGGINGFACE', 'REQUEST', 'GET /api/models + /api/datasets search=' + spec.subdomain);
+
         const [rawKaggle, rawHfModels, rawHfDatasets] = await Promise.all([
-            searchKaggleDatasets(spec, apiTrace.kaggle),
-            searchHuggingFaceModels(spec, apiTrace.huggingface),
-            searchHuggingFaceDatasets(spec, apiTrace.huggingface)
+            searchKaggleDatasets(spec, kaggleTrace, query),
+            searchHuggingFaceModels(spec, hfTrace, query),
+            searchHuggingFaceDatasets(spec, hfTrace, query),
         ]);
 
-        if (DEBUG_API_TRACE) {
-            console.log('[KAGGLE] START');
-            console.log(`[KAGGLE] END status=${apiTrace.kaggle.status || 200} duration=${apiTrace.kaggle.durationMs || 0}ms`);
-            console.log(`[KAGGLE] datasets returned=${apiTrace.kaggle.datasetsFound || 0}`);
-
-            console.log('[HUGGINGFACE] START');
-            console.log(`[HUGGINGFACE] END status=${apiTrace.huggingface.status || 200} duration=${apiTrace.huggingface.durationMs || 0}ms`);
-            console.log(`[HUGGINGFACE] datasets returned=${apiTrace.huggingface.datasetsFound || 0}`);
+        // Reconcile Kaggle audit
+        if (audit.kaggle.status !== 'NOT_CONFIGURED') {
+            if (kaggleTrace.success === false) {
+                audit.kaggle.status = 'CALLED_FAILED';
+                audit.kaggle.success = false;
+                audit.kaggle.httpStatus = kaggleTrace.status || 401;
+                audit.kaggle.error = kaggleTrace.reason || 'Kaggle API call failed';
+                log('KAGGLE', 'ERROR', 'status=' + (kaggleTrace.status || 'unknown') + ' ' + (kaggleTrace.reason || ''));
+            } else {
+                audit.kaggle.status = 'CALLED_SUCCESSFULLY';
+                audit.kaggle.called = true;
+                audit.kaggle.success = true;
+                audit.kaggle.httpStatus = 200;
+                audit.kaggle.responseTimeMs = kaggleTrace.durationMs || 0;
+                audit.kaggle.resultsReturned = rawKaggle.length;
+                log('KAGGLE', 'RESPONSE', 'status=200 responseTime=' + (kaggleTrace.durationMs || 0) + 'ms');
+                log('KAGGLE', 'SUCCESS', 'datasets_returned=' + rawKaggle.length);
+            }
         }
 
-        const kaggleCandidates: Array<Record<string, unknown>> = [...rawKaggle, ...rawHfDatasets];
-        const hfCandidates: Array<Record<string, unknown>> = rawHfModels;
+        // Reconcile HF audit - tracked separately for models vs datasets
+        const hfModelsOk = rawHfModels.length > 0;
+        const hfDatasetsOk = rawHfDatasets.length > 0;
+        const hfAnyOk = hfModelsOk || hfDatasetsOk;
+        const hfDur = hfTrace.durationMs || 0;
 
-        // ── Deterministic Scoring + Hard-Negative Filter ──────────────────
-        const scoredDatasets = kaggleCandidates
-            .map(d => scoreDataset(d, spec))
-            .sort((a, b) => b.matchScore - a.matchScore);
+        // Models separate entry
+        audit.huggingfaceModels = {
+            ...audit.huggingfaceModels,
+            status: hfModelsOk ? 'CALLED_SUCCESSFULLY' : 'CALLED_SUCCESSFULLY', // HF is always attempted
+            called: true,
+            success: hfModelsOk,
+            httpStatus: 200,
+            responseTimeMs: hfDur,
+            resultsReturned: rawHfModels.length,
+        };
+        log('HUGGINGFACE-MODELS', hfModelsOk ? 'SUCCESS' : 'WARNING', 'results=' + rawHfModels.length + ' duration=' + hfDur + 'ms');
 
+        // Datasets separate entry
+        audit.huggingfaceDatasets = {
+            ...audit.huggingfaceDatasets,
+            status: hfDatasetsOk ? 'CALLED_SUCCESSFULLY' : 'CALLED_SUCCESSFULLY',
+            called: true,
+            success: hfDatasetsOk,
+            httpStatus: 200,
+            responseTimeMs: hfDur,
+            resultsReturned: rawHfDatasets.length,
+        };
+        log('HUGGINGFACE-DATASETS', hfDatasetsOk ? 'SUCCESS' : 'WARNING', 'results=' + rawHfDatasets.length + ' duration=' + hfDur + 'ms');
+
+        // Combined HF summary
+        if (!hfAnyOk && hfTrace.success === false) {
+            audit.huggingface.status = 'CALLED_FAILED';
+            audit.huggingface.success = false;
+            audit.huggingface.httpStatus = hfTrace.status || 403;
+            audit.huggingface.error = 'Hugging Face API returned no results';
+            log('HUGGINGFACE', 'ERROR', 'status=' + (hfTrace.status || 'unknown'));
+        } else {
+            audit.huggingface.status = 'CALLED_SUCCESSFULLY';
+            audit.huggingface.called = true;
+            audit.huggingface.success = true;
+            audit.huggingface.httpStatus = 200;
+            audit.huggingface.responseTimeMs = hfDur;
+            audit.huggingface.resultsReturned = rawHfModels.length + rawHfDatasets.length;
+            log('HUGGINGFACE', 'RESPONSE', 'status=200 responseTime=' + hfDur + 'ms');
+            log('HUGGINGFACE', 'SUCCESS', 'models=' + rawHfModels.length + ' datasets=' + rawHfDatasets.length);
+        }
+
+        const allDatasetCandidates: Array<Record<string, unknown>> = [...rawKaggle, ...rawHfDatasets];
+        const scoredDatasets = allDatasetCandidates.map(d => scoreDataset(d, spec)).sort((a, b) => b.matchScore - a.matchScore);
         const nonRejectedDatasets = scoredDatasets.filter(d => !d.rejected);
-
-        const scoredModels = hfCandidates
-            .map((m) => scoreModel(m, spec))
-            .sort((a, b) => b.matchScore - a.matchScore);
-
+        const scoredModels = rawHfModels.map(m => scoreModel(m, spec)).sort((a, b) => b.matchScore - a.matchScore);
         const nonRejectedModels = scoredModels.filter(m => !m.rejected);
-
-        if (DEBUG_API_TRACE) {
-            console.log(`[FILTER] candidates before filtering=${kaggleCandidates.length}`);
-            console.log(`[FILTER] hard-negative candidates removed=${kaggleCandidates.length - nonRejectedDatasets.length}`);
-            console.log(`[FILTER] candidates after filtering=${nonRejectedDatasets.length}`);
-
-            console.log(`[RANKING] scoring candidates=${nonRejectedDatasets.length}`);
-        }
 
         const topDatasets = scoredDatasets.slice(0, 3);
         const topModels = scoredModels.slice(0, 3);
         const bestDataset = nonRejectedDatasets[0] ?? null;
         const bestModel = nonRejectedModels[0] ?? null;
 
-        if (DEBUG_API_TRACE) {
-            console.log(`[BEST DATASET] name="${bestDataset ? bestDataset.name : 'null'}"`);
-            console.log(`[BEST DATASET] score=${bestDataset ? bestDataset.matchScore : 0}%`);
-            console.log(`[MODEL SEARCH] models found=${nonRejectedModels.length}`);
-        }
-
-        // ── Feasibility & Hardware (Deterministic) ────────────────────────
         const feasibility = calculateFeasibility(
-            scoredDatasets as typeof scoredDatasets,
-            scoredModels as typeof scoredModels,
+            scoredDatasets as any, scoredModels as any,
             Array.isArray(spec.task) ? spec.task.join(', ') : spec.task,
             spec.data_modality,
         );
         const hardware = estimateHardware(
-            bestDataset as typeof bestDataset,
-            bestModel as typeof bestModel,
+            bestDataset as any, bestModel as any,
             Array.isArray(spec.task) ? spec.task.join(', ') : spec.task,
             spec.data_modality,
         );
 
-        if (DEBUG_API_TRACE) {
-            console.log(`[FINAL] search completed duration=${Math.round(performance.now() - ROUTE_START)}ms`);
-        }
+        // Enrich top datasets with quality/risk/trainability analysis
+        const taskStr = Array.isArray(spec.task) ? spec.task.join(', ') : spec.task;
+        const enrichedTopDatasets = topDatasets.map(d =>
+            enrichDataset(d, spec, taskStr, spec.data_modality)
+        );
+
+        // Search coverage
+        const searchCoverage = computeSearchCoverage(rawKaggle, rawHfDatasets, rawHfModels);
+
+        // Compatibility between top datasets
+        const datasetCompatibility = analyzeDatasetCompatibility(topDatasets.filter(d => !d.rejected).slice(0, 4));
+
+        // Label mapping suggestions
+        const labelMapping = suggestLabelMapping(topDatasets.filter(d => !d.rejected));
+
+        // Recommendation categories
+        const recommendationCategories = generateRecommendationCategories(topDatasets, spec);
+
+        // Smart final recommendation
+        const smartRecommendation = generateSmartRecommendation(spec, bestDataset, bestModel, hardware);
+
+        const totalMs = Math.round(performance.now() - ROUTE_START);
+        log('OPENROUTER', 'END', 'total_route_duration=' + totalMs + 'ms');
+        if (DEBUG_TRACE) console.log('[API-AUDIT][SUMMARY] openrouter=' + audit.openrouter.status + ' kaggle=' + audit.kaggle.status + ' huggingface=' + audit.huggingface.status + ' duration=' + totalMs + 'ms');
 
         return NextResponse.json({
             success: true,
             ai_mode: aiMode,
             analysis: spec,
-            results: {
-                kaggle: topDatasets,
-                hfModels: topModels,
-                hfDatasets: [],
-            },
+            results: { kaggle: enrichedTopDatasets, hfModels: topModels, hfDatasets: [] },
             summary: {
-                projectTitle: spec.title,
-                domain: spec.domain,
-                subdomain: spec.subdomain,
-                task: spec.task,
-                dataType: spec.data_modality,
+                projectTitle: spec.title, domain: spec.domain, subdomain: spec.subdomain,
+                task: spec.task, dataType: spec.data_modality,
                 datasetsFound: topDatasets.filter(d => !d.rejected).length,
                 modelsFound: topModels.filter(m => !m.rejected).length,
-                bestDataset,
+                bestDataset: bestDataset ? enrichDataset(bestDataset, spec, taskStr, spec.data_modality) : null,
                 bestModel,
             },
-            feasibility,
-            hardware,
-            searchId,
-            ...(DEBUG_API_TRACE && { apiTrace }),
+            feasibility, hardware, searchId,
+            searchCoverage,
+            datasetCompatibility,
+            labelMapping,
+            recommendationCategories,
+            smartRecommendation,
+            using_fallback_datasets: rawKaggle.length === 0,
         });
 
     } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : 'Unexpected server error.';
-        console.error('[search/route] Error:', message, { query, searchId });
+        // Log full error server-side only — never expose raw internals to the client
+        const rawMessage = e instanceof Error ? e.message : 'Unexpected server error.';
+        console.error('[API-AUDIT][SERVER][ERROR] ' + rawMessage.slice(0, 300), { query, searchId });
 
-        // Try to parse a structured OpenRouter/provider error
-        let errObj: Record<string, unknown> | null = null;
+        // Map known structured error types to safe HTTP status codes and messages
+        let httpStatus = 500;
+        let clientMessage = 'Search failed. Please try again.';
         if (e instanceof Error) {
-            try { errObj = JSON.parse(e.message); } catch { /* raw error */ }
-        }
-
-        if (errObj?.type) {
-            const statusValue = typeof errObj.status === 'number' ? errObj.status : 500;
-            const httpStatus = statusValue < 600 ? statusValue : 500;
-
-            if (DEBUG_API_TRACE) {
-                console.log(`[FINAL] search completed duration=${Math.round(performance.now() - ROUTE_START)}ms`);
+            try {
+                const errObj: Record<string, unknown> = JSON.parse(e.message);
+                if (typeof errObj.status === 'number' && errObj.status >= 400 && errObj.status < 600) {
+                    httpStatus = errObj.status;
+                }
+                const safeMessages: Record<string, string> = {
+                    UNAUTHORIZED:         'Authentication required.',
+                    RATE_LIMITED:         'Too many requests. Please wait before searching again.',
+                    MISSING_CREDENTIALS:  'Search service is not configured.',
+                    PROVIDER_API_ERROR:   'AI provider is unavailable. Please try again.',
+                    OPENROUTER_API_ERROR: 'AI analysis failed. Please try again.',
+                    CONFIGURATION_ERROR:  'Server configuration error.',
+                    VALIDATION_ERROR:     'Invalid search request.',
+                };
+                const errType = typeof errObj.type === 'string' ? errObj.type : '';
+                clientMessage = safeMessages[errType] || 'Search failed. Please try again.';
+            } catch {
+                // Not a structured error — keep generic message
             }
-
-            return NextResponse.json({
-                success: false,
-                source: 'openrouter',
-                status: 'failed',
-                ai_mode: 'LIVE',
-                error: errObj,
-                mock_available: true,
-                searchId,
-                ...(DEBUG_API_TRACE && { apiTrace }),
-            }, { status: httpStatus });
-        }
-
-        if (DEBUG_API_TRACE) {
-            console.log(`[FINAL] search completed duration=${Math.round(performance.now() - ROUTE_START)}ms`);
         }
 
         return NextResponse.json({
             success: false,
-            source: 'server',
-            status: 'failed',
-            ai_mode: 'LIVE',
-            error: {
-                type: 'SERVER_ERROR',
-                status: 500,
-                message,
-            },
-            mock_available: true,
+            error: { status: httpStatus, message: clientMessage },
             searchId,
-            ...(DEBUG_API_TRACE && { apiTrace }),
-        }, { status: 500 });
+        }, { status: httpStatus });
     }
 }

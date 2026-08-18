@@ -8,11 +8,11 @@ export interface ConfidenceBreakdown {
     reason: string;
 }
 
-export function calculateDeterministicConfidence(analysis, queryLength) {
-    const tasks = Array.isArray(analysis && analysis.task) ? analysis.task.filter(Boolean) : [analysis && analysis.task].filter(Boolean);
-    const unknowns = (analysis && analysis.unknown_facts) || [];
-    const explicitFacts = (analysis && analysis.explicit_facts) || [];
-    const ambiguities = (analysis && analysis.ambiguity_notes) || [];
+export function calculateDeterministicConfidence(analysis: Record<string, unknown>, queryLength: number): ConfidenceBreakdown {
+    const tasks = Array.isArray(analysis['task']) ? (analysis['task'] as unknown[]).filter(Boolean) : [analysis['task']].filter(Boolean);
+    const unknowns = (Array.isArray(analysis['unknown_facts']) ? analysis['unknown_facts'] : []) as unknown[];
+    const explicitFacts = (Array.isArray(analysis['explicit_facts']) ? analysis['explicit_facts'] : []) as unknown[];
+    const ambiguities = (Array.isArray(analysis['ambiguity_notes']) ? analysis['ambiguity_notes'] : []) as unknown[];
     let taskCertainty = 40;
     if (tasks.length > 0 && tasks[0] !== 'Unknown' && tasks[0] !== 'General AI task') taskCertainty += 40;
     if (tasks.length > 1) taskCertainty += 10;
@@ -27,13 +27,13 @@ export function calculateDeterministicConfidence(analysis, queryLength) {
     if (analysis && analysis.input_type && analysis.input_type !== 'Unknown') modalityCertainty += 30;
     modalityCertainty = Math.min(100, modalityCertainty);
     let targetCertainty = 30;
-    const labels = (analysis && analysis.target_labels) || [];
+    const labels = (Array.isArray(analysis['target_labels']) ? analysis['target_labels'] : []) as unknown[];
     if (labels.length > 0) targetCertainty += 50;
     if (analysis && analysis.target_type && analysis.target_type !== 'unknown') targetCertainty += 20;
     targetCertainty = Math.min(100, targetCertainty);
     let archCertainty = 40;
     if (analysis && analysis.primary_architecture && analysis.primary_architecture !== 'Unknown' && analysis.primary_architecture !== 'Custom model') archCertainty += 35;
-    if (Array.isArray(analysis && analysis.alternative_architectures) && analysis.alternative_architectures.length > 0) archCertainty += 15;
+    if (Array.isArray(analysis['alternative_architectures']) && (analysis['alternative_architectures'] as unknown[]).length > 0) archCertainty += 15;
     if (analysis && analysis.architecture_reasoning) archCertainty += 10;
     archCertainty = Math.min(100, archCertainty);
     const unknownPenalty = Math.min(30, unknowns.length * 5);
