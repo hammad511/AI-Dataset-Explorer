@@ -37,6 +37,7 @@ import { getTaskAlignmentScore, classifyCandidateTask, classifyTask } from './ta
 import { getRequirementProfile } from './requirementExtractor';
 import { matchCandidateRequirements, computeRequirementCoverage, computeHardConstraintScore } from './requirementMatcher';
 import { calibrateScore, categorizeRequirements } from './confidenceCalibrator';
+import { calculatePaperConfidence, calculateDatasetConfidence, calculateModelConfidence } from './confidence';
 
 /** Confidence status for a result set Ã¢â‚¬â€ evaluated after all candidates are scored. */
 export type ConfidenceStatus = 'HIGH_CONFIDENCE' | 'PARTIAL_OR_LOW_CONFIDENCE';
@@ -250,38 +251,64 @@ export function scoreCandidate(
     }
     const candReqMatches = reqMatches.length > 0 ? reqMatches : (candidate as UnifiedCandidate).requirementMatches || [];
     
-    const verifiedReqs2 = candReqMatches.filter(m => m.status === 'SATISFIED');
-    const unknownReqs2 = candReqMatches.filter(m => m.status === 'UNKNOWN');
-    const failedReqs2 = candReqMatches.filter(m => m.status === 'NOT_SATISFIED');
-
-    const totalReqs = candReqMatches.length || 1;
-    let evidenceCoverage = verifiedReqs2.length / totalReqs;
-    if (candReqMatches.length === 0) evidenceCoverage = 1.0;
-
-    let baseConfidence = Math.round(evidenceCoverage * 100);
-
-    const missingCriticalReqs = failedReqs2.filter(m => {
-        const reqDef = requirementProfile.requirements.find(r => r.id === m.requirementId);
-        return reqDef?.importance === 'CRITICAL';
-    });
-    if (missingCriticalReqs.length > 0) {
-        baseConfidence = 0;
-    } else if (failedReqs2.length > 0) {
-        baseConfidence = Math.min(baseConfidence, 35);
-    } else if (unknownReqs2.length > 0) {
-        baseConfidence = Math.min(baseConfidence, 65);
-    }
-
-    const hardFailed = failedReqs2.some(m => ['req_modality', 'req_vram'].includes(m.requirementId)) || missingCriticalReqs.length > 0;
-    if (hardFailed) {
-        baseConfidence = 0;
-    }
-
+    // Compute preliminary component scores
     const anatomyScore = Math.round(cross.anatomyMatch * 100);
     const modalityScore = Math.round(cross.modalityMatch * 100);
     const taskScore = Math.round(cross.taskMatch * 100);
     const domainScore = Math.round(cross.domainMatch * 100);
     const semanticScore = Math.max(bm25Score, Math.round(cross.suitability * 100));
+
+    // Exclude resource-specific requirements that do not apply to literature
+    const isPaper = candidate.type === 'paper';
+    const applicableReqMatches = isPaper
+        ? candReqMatches.filter(m => !['req_gpu', 'req_size', 'req_formats', 'req_license'].includes(m.requirementId))
+        : candReqMatches;
+
+    const verifiedReqs2 = applicableReqMatches.filter(m => m.status === 'SATISFIED');
+    const unknownReqs2 = applicableReqMatches.filter(m => m.status === 'UNKNOWN');
+    const failedReqs2 = applicableReqMatches.filter(m => m.status === 'NOT_SATISFIED');
+    const conflictReqs2 = applicableReqMatches.filter(m => m.status === 'CONFLICT');
+
+    // ── HARD CONSTRAINT CONTRADICTION CHECKS ──
+    const rawQLower = originalQuery.toLowerCase();
+    const queryRequiresLongitudinal = /longitudinal|multi[- ]?timepoint|follow[- ]?up|progression over|serial\s*scan|repeat\s*scan/i.test(rawQLower);
+    const isExplicitCrossSectional = queryRequiresLongitudinal && /\bcross[- ]sectional\b|\bsingle[- ]timepoint\b|\bsingle[- ]visit\b|\bone[- ]time\s*snapshot\b/i.test(candidateBlob);
+
+    const queryRequires3D = /\b(?:3d|3-d|volumetric|voxel|ct\b|mri\b|cbct|nifti|\.nii)\b/i.test(rawQLower);
+    const queryRequires2D = /\b(?:2d|2-d|planar|fundus|retinal\s*photograph|rgb|dermoscop|skin\s*lesion)\b/i.test(rawQLower) && !queryRequires3D;
+    const is3DVolumetricCand = /\b(?:3d\s*(?:mri|ct|volume|volumetric|segmentation|unetr)|swin[- ]unetr|sam[- ]med3d|voxel|nifti|\.nii(?:\.gz)?)\b/i.test(candidateBlob) && !/\b2d\b/i.test(candidateBlob);
+    const isDimensionContradiction = (queryRequires2D && is3DVolumetricCand);
+
+    const queryRequiresRealPatient = /\b(?:patient\s*clinical\s*data|real[- ]patient|clinical\s*cohort|\d+[\s,]*patients|confirmed\s*progression\s*labels?|electronic\s*health\s*records?|ehr\b)\b/i.test(rawQLower);
+    const isSyntheticContradiction = queryRequiresRealPatient && /\b(?:synthetic\s*(?:patient|data|dataset|cohort|images?)|in[- ]silico\s*(?:generated|patient|data)|diffusion[- ]generated\s*patient|artificially\s*synthesized)\b/i.test(candidateBlob);
+
+    const hasContradiction = conflictReqs2.length > 0 || isExplicitCrossSectional || isDimensionContradiction || isSyntheticContradiction;
+
+    const totalReqs = applicableReqMatches.length || 1;
+    let evidenceCoverage = verifiedReqs2.length / totalReqs;
+    if (applicableReqMatches.length === 0) evidenceCoverage = 1.0;
+
+    const missingCriticalReqs = failedReqs2.filter(m => {
+        const reqDef = requirementProfile.requirements.find(r => r.id === m.requirementId);
+        return reqDef?.importance === 'CRITICAL';
+    });
+
+    const hardFailed = failedReqs2.some(m => ['req_modality', 'req_vram', 'req_longitudinal'].includes(m.requirementId)) || 
+                       missingCriticalReqs.length > 0 || 
+                       hasContradiction;
+
+    // Per-item continuous confidence calculation (never static tier lookup table)
+    let baseConfidence = 0;
+    if (hardFailed || modalityZeroKill) {
+        baseConfidence = 0;
+    } else if (isPaper) {
+        baseConfidence = calculatePaperConfidence(candidate as UnifiedCandidate, semanticScore, taskScore, domainScore);
+    } else if (candidate.type === 'model') {
+        baseConfidence = calculateModelConfidence(candidate as UnifiedCandidate, verifiedReqs2.length, totalReqs);
+    } else {
+        baseConfidence = calculateDatasetConfidence(candidate as UnifiedCandidate, verifiedReqs2.length, totalReqs);
+    }
+
     const evidenceScore = baseConfidence;
 
     // Metadata & accessibility

@@ -3,7 +3,7 @@
     "id": 1,
     "name": "Lung Cancer 3D CT",
     "query": "Lung cancer / 3D chest CT (classification + detection + segmentation, 10GB)",
-    "elapsedMs": 15997,
+    "elapsedMs": 8153,
     "domainExtracted": "Biomedical / Pulmonary & Thoracic Imaging",
     "tasksExtracted": [
       "Segmentation",
@@ -27,13 +27,13 @@
       "datasets": [
         {
           "title": "lung-cancer",
-          "score": 71,
+          "score": 72,
           "tier": "Tier B",
           "evidence": "PARTIAL"
         },
         {
           "title": "lung-cancer",
-          "score": 71,
+          "score": 72,
           "tier": "Tier B",
           "evidence": "PARTIAL"
         }
@@ -55,15 +55,15 @@
       "papers": [
         {
           "title": "A few-shot U-Net deep learning model for lung cancer lesion segmentation via PET/CT imaging",
-          "score": 85,
-          "tier": "Tier B",
-          "evidence": "SUPPORTED"
+          "score": 86,
+          "tier": "Tier A",
+          "evidence": "VERIFIED"
         },
         {
           "title": "A review of uncertainty quantification in deep learning: Techniques, applications and challenges",
-          "score": 77,
+          "score": 78,
           "tier": "Tier B",
-          "evidence": "SUPPORTED"
+          "evidence": "VERIFIED"
         }
       ]
     },
@@ -74,7 +74,7 @@
     "id": 2,
     "name": "Aircraft Fuselage Defects",
     "query": "Aircraft fuselage skin panel defects / 2D RGB (classification + detection + segmentation, 8GB)",
-    "elapsedMs": 19360,
+    "elapsedMs": 11581,
     "domainExtracted": "Aerospace & Industrial Defect Inspection",
     "tasksExtracted": [
       "Segmentation",
@@ -98,13 +98,13 @@
       "datasets": [
         {
           "title": "Land Cover Classification : Bhuvan Satellite Data",
-          "score": 56,
+          "score": 58,
           "tier": "Tier C",
           "evidence": "SUPPORTED"
         },
         {
-          "title": "SPE3R: Synthetic Dataset for Satellites",
-          "score": 56,
+          "title": "Warehouse Object Detection Dataset",
+          "score": 58,
           "tier": "Tier C",
           "evidence": "SUPPORTED"
         }
@@ -112,27 +112,27 @@
       "models": [
         {
           "title": "RALL_RGBCROP_Aug16F-2DO1",
-          "score": 36,
+          "score": 37,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         },
         {
           "title": "RALL_RGBCROP_Aug16F-2DO2",
-          "score": 36,
+          "score": 37,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         }
       ],
       "papers": [
         {
-          "title": "A review of uncertainty quantification in deep learning: Techniques, applications and challenges",
-          "score": 74,
+          "title": "Deep learning in remote sensing applications: A meta-analysis and review",
+          "score": 75,
           "tier": "Tier B",
           "evidence": "VERIFIED"
         },
         {
-          "title": "Deep learning in remote sensing applications: A meta-analysis and review",
-          "score": 74,
+          "title": "A review of uncertainty quantification in deep learning: Techniques, applications and challenges",
+          "score": 75,
           "tier": "Tier B",
           "evidence": "VERIFIED"
         }
@@ -145,7 +145,7 @@
     "id": 3,
     "name": "Crop Yield & Disease",
     "query": "Crop yield + disease / multispectral satellite (regression + classification + segmentation, 6GB)",
-    "elapsedMs": 13042,
+    "elapsedMs": 7594,
     "domainExtracted": "Agriculture & Remote Sensing",
     "tasksExtracted": [
       "Regression",
@@ -169,13 +169,13 @@
       "datasets": [
         {
           "title": "Africa Synth Agriculture Seasonal Crop Yields Nigeria | Africa (Electric Sheep Africa metadata inventory)",
-          "score": 58,
+          "score": 59,
           "tier": "Tier C",
           "evidence": "PARTIAL"
         },
         {
-          "title": "Cereal Crop Yield Vs Fertilizer Application | Asia (Our World in Data)",
-          "score": 58,
+          "title": "Cereal Crop Yield Vs Fertilizer Application | Africa (Our World in Data) | Africa (Electric Sheep Africa metadata inventory)",
+          "score": 59,
           "tier": "Tier C",
           "evidence": "PARTIAL"
         }
@@ -197,15 +197,15 @@
       "papers": [
         {
           "title": "A comparison of deep learning performance against health-care professionals in detecting diseases from medical imaging: a systematic review and meta-analysis",
-          "score": 53,
+          "score": 57,
           "tier": "Tier C",
-          "evidence": "PARTIAL"
+          "evidence": "SUPPORTED"
         },
         {
           "title": "Deep learning in remote sensing applications: A meta-analysis and review",
-          "score": 48,
-          "tier": "Tier D",
-          "evidence": "PARTIAL"
+          "score": 51,
+          "tier": "Tier C",
+          "evidence": "SUPPORTED"
         }
       ]
     },
@@ -216,7 +216,7 @@
     "id": 4,
     "name": "Customer Support Ticket Triage",
     "query": "Customer support ticket triage / multilingual text (classification + priority + NER + summarization, 12GB)",
-    "elapsedMs": 15508,
+    "elapsedMs": 13657,
     "domainExtracted": "Natural Language Processing & Language Models",
     "tasksExtracted": [
       "Classification",
@@ -240,14 +240,14 @@
     "topScores": {
       "datasets": [
         {
-          "title": "Customer Support Tickets - CRM dataset",
-          "score": 37,
+          "title": "multilingual_toxicity_dataset",
+          "score": 39,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         },
         {
           "title": "multilingual_toxic_lexicon",
-          "score": 37,
+          "score": 39,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         }
@@ -255,27 +255,27 @@
       "models": [
         {
           "title": "ner-multilingual-bert",
-          "score": 48,
+          "score": 49,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         },
         {
           "title": "text-classification-model-multilingual",
-          "score": 38,
+          "score": 39,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         }
       ],
       "papers": [
         {
-          "title": "A SYSTEMATIC REVIEW OF AI AND MACHINE LEARNING-DRIVEN IT SUPPORT SYSTEMS: ENHANCING EFFICIENCY AND AUTOMATION IN TECHNICAL SERVICE MANAGEMENT",
-          "score": 46,
-          "tier": "Tier D",
+          "title": "Automated Multi-Category Classification of Customer Support Tickets using XGBoost",
+          "score": 50,
+          "tier": "Tier C",
           "evidence": "PARTIAL"
         },
         {
           "title": "Exploring the Limits of Transfer Learning with a Unified Text-to-Text\\n Transformer",
-          "score": 46,
+          "score": 49,
           "tier": "Tier D",
           "evidence": "PARTIAL"
         }

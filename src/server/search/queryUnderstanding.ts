@@ -331,15 +331,19 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
 
 
     // 7. Temporal & Dimensionality Constraints
+    const isExplicit3D = /\b(?:3d|3-d|volumetric|voxel|ct\b|mri\b|cbct|nifti|\.nii)\b/i.test(qLower);
+    const isExplicit2D = /\b(?:2d|2-d|planar|rgb|photograph|photo|fundus|retinopath|x[- ]?ray|chest\s*xr|microscop|dermoscop|skin\s*lesion|satellite)\b/i.test(qLower);
+    const isSpatiotemporal4D = /\b(?:4d|4-d|spatiotemporal|time[- ]resolved\s*3d|4d\s*flow)\b/i.test(qLower) || (isExplicit3D && /longitudinal|multi[- ]timepoint/i.test(qLower));
+
     const dimensionality: string[] = [];
-    if (/4d|4-d|spatiotemporal|time-resolved\s*3d|longitudinal/i.test(qLower)) {
+    if (isSpatiotemporal4D) {
         dimensionality.push('4D (3D spatial + 1D temporal)', 'Longitudinal Volumetric');
-    } else if (/3d|volumetric|voxel/i.test(qLower)) {
+    } else if (isExplicit3D && !isExplicit2D) {
         dimensionality.push('3D volumetric');
-    } else if (/2d/i.test(qLower)) {
+    } else if (isExplicit2D) {
         dimensionality.push('2D planar');
     } else {
-        dimensionality.push('3D/4D');
+        dimensionality.push('2D planar');
     }
 
     const temporalRequirement: string[] = [];

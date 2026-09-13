@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Requirement Matcher
  *
  * For every candidate, evaluates each requirement in the RequirementProfile and
@@ -333,6 +333,17 @@ export function matchCandidateRequirements(
 
             // ── Longitudinal ─────────────────────────────────────────────────
             case "LONGITUDINAL": {
+                const isExplicitCrossSectional = /\bcross[- ]sectional\b|\bsingle[- ]timepoint\b|\bsingle[- ]visit\b|\bone[- ]time\s*snapshot\b/i.test(blob);
+                if (isExplicitCrossSectional) {
+                    m = {
+                        requirementId: req.id,
+                        status: "CONFLICT",
+                        evidence: "Explicitly cross-sectional dataset",
+                        confidence: 1.0,
+                        explanation: "CONTRADICTION: Candidate metadata explicitly states 'cross-sectional' / single-timepoint structure, directly conflicting with the required longitudinal multi-timepoint data structure."
+                    };
+                    break;
+                }
                 const hasLong = /longitudinal|multi.?timepoint|follow.?up|visit|timepoint|serial\s*scan|repeat\s*scan|progression.*scan|longitudinal\s*cohort/i.test(blob);
                 const inTitle = /longitudinal|follow.?up|multi.?time/i.test(title);
                 m = {
@@ -378,6 +389,17 @@ export function matchCandidateRequirements(
 
             // ── Clinical ──────────────────────────────────────────────────────
             case "CLINICAL": {
+                const isExplicitlySynthetic = /\b(?:synthetic\s*(?:patient|data|dataset|cohort|images?)|in[- ]silico\s*(?:generated|patient|data)|diffusion[- ]generated\s*patient|artificially\s*synthesized)\b/i.test(blob);
+                if (isExplicitlySynthetic) {
+                    m = {
+                        requirementId: req.id,
+                        status: "CONFLICT",
+                        evidence: "Explicitly synthetic / in-silico data",
+                        confidence: 1.0,
+                        explanation: "CONTRADICTION: Candidate is synthetic / simulated data, directly contradicting the requirement for real patient clinical cohort data."
+                    };
+                    break;
+                }
                 const hasClinical = /clinical|tabular|ehr|demographic|biomarker|lab\s*value|spirometry|questionnaire|patient\s*record/i.test(blob);
                 m = {
                     requirementId: req.id,

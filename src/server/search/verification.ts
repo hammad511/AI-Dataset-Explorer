@@ -130,6 +130,69 @@ export function verifyCandidate(
         else if (vramStatus === 'SATISFIED') verified.push(match);
         else unknown.push(match);
     }
+
+    // 4. HARD CONSTRAINT CONTRADICTION CHECKS
+    const rawQuery = (profile.rawQuery || '').toLowerCase();
+
+    // 4a. Longitudinal vs. Cross-Sectional Contradiction
+    const queryRequiresLongitudinal = /longitudinal|multi[- ]?timepoint|follow[- ]?up|progression over|serial\s*scan|repeat\s*scan/i.test(rawQuery);
+    if (queryRequiresLongitudinal) {
+        const isExplicitlyCrossSectional = /\bcross[- ]sectional\b|\bsingle[- ]timepoint\b|\bsingle[- ]visit\b|\bone[- ]time\s*snapshot\b/i.test(candidateBlob);
+        if (isExplicitlyCrossSectional) {
+            failed.push({
+                requirementId: 'req_longitudinal_contradiction',
+                status: 'NOT_SATISFIED',
+                evidence: 'Candidate metadata explicitly admits cross-sectional structure',
+                confidence: 1.0,
+                explanation: 'Fatal Contradiction: Metadata explicitly describes cross-sectional / single-timepoint structure, directly contradicting the hard requirement for longitudinal multi-timepoint data.'
+            });
+        }
+    }
+
+    // 4b. Dimensionality Contradiction: 2D vs 3D
+    const queryRequires3D = /\b(?:3d|3-d|volumetric|voxel|ct\b|mri\b|cbct|nifti|\.nii)\b/i.test(rawQuery);
+    const queryRequires2D = /\b(?:2d|2-d|planar|fundus|retinal\s*photograph|rgb|dermoscop|skin\s*lesion)\b/i.test(rawQuery) && !queryRequires3D;
+
+    if (queryRequires2D) {
+        const isCandidate3D = /\b(?:3d\s*(?:mri|ct|volume|volumetric|segmentation|unetr)|swin[- ]unetr|sam[- ]med3d|voxel|nifti|\.nii(?:\.gz)?)\b/i.test(candidateBlob) &&
+                              !/\b2d\b/i.test(candidateBlob);
+        if (isCandidate3D) {
+            failed.push({
+                requirementId: 'req_dimension_contradiction',
+                status: 'NOT_SATISFIED',
+                evidence: 'Candidate is 3D volumetric architecture/dataset',
+                confidence: 1.0,
+                explanation: 'Fatal Contradiction: Candidate is 3D volumetric, directly contradicting the hard requirement for 2D planar imaging.'
+            });
+        }
+    } else if (queryRequires3D) {
+        const isCandidate2DOnly = /\b(?:2d\s*rgb\s*only|2d\s*planar\s*photographs?|natural\s*images?\s*only)\b/i.test(candidateBlob) &&
+                                  !/\b(?:3d|ct|mri|volume|volumetric)\b/i.test(candidateBlob);
+        if (isCandidate2DOnly) {
+            failed.push({
+                requirementId: 'req_dimension_contradiction',
+                status: 'NOT_SATISFIED',
+                evidence: 'Candidate is 2D planar only',
+                confidence: 1.0,
+                explanation: 'Fatal Contradiction: Candidate is 2D planar only, directly contradicting the hard requirement for 3D volumetric imaging.'
+            });
+        }
+    }
+
+    // 4c. Real Patient Data vs. Synthetic Contradiction
+    const queryRequiresRealPatient = /\b(?:patient\s*clinical\s*data|real[- ]patient|clinical\s*cohort|\d+[\s,]*patients|confirmed\s*progression\s*labels?|electronic\s*health\s*records?|ehr\b)\b/i.test(rawQuery);
+    if (queryRequiresRealPatient) {
+        const isExplicitlySynthetic = /\b(?:synthetic\s*(?:patient|data|dataset|cohort|images?)|in[- ]silico\s*(?:generated|patient|data)|diffusion[- ]generated\s*patient|artificially\s*synthesized)\b/i.test(candidateBlob);
+        if (isExplicitlySynthetic) {
+            failed.push({
+                requirementId: 'req_synthetic_contradiction',
+                status: 'NOT_SATISFIED',
+                evidence: 'Candidate is synthetic/in-silico data',
+                confidence: 1.0,
+                explanation: 'Fatal Contradiction: Candidate is synthetic / simulated data, directly contradicting the requirement for real patient clinical cohort data.'
+            });
+        }
+    }
     
     const passed = failed.length === 0;
     return { passed, verified, unknown, failed };

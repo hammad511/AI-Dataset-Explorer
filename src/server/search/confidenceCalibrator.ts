@@ -24,10 +24,10 @@ import { computeRequirementCoverage, computeHardConstraintScore } from "./requir
 
 // ── Configurable caps ─────────────────────────────────────────────────────────
 const CAPS = {
-    DOMAIN_CONFLICT:           25,   // explicit domain CONFLICT in title
+    DOMAIN_CONFLICT:            0,   // explicit domain/requirement CONFLICT in title or metadata (hard veto)
     CRITICAL_HARD_VIOLATIONS_2: 0,   // 2+ critical hard requirements missing/conflict
     CRITICAL_HARD_VIOLATION_1:  0,   // 1 critical hard requirement missing/conflict
-    MULTIPLE_SOFT_VIOLATIONS:   55,  // 3+ soft requirements missing (but no hard violations)
+    MULTIPLE_SOFT_VIOLATIONS:   50,  // 3+ soft requirements missing (but no hard violations)
     TASK_MISMATCH:              0,   // hard task mismatch
     NO_HARD_CAP:               100, // no violations
 } as const;
@@ -114,13 +114,13 @@ function computeCap(
     violations: ReturnType<typeof countCriticalViolations>
 ): { cap: number | null; reason: string | null } {
     if (violations.hasConflict) {
-        return { cap: CAPS.DOMAIN_CONFLICT, reason: "Domain CONFLICT: explicit domain contradiction in candidate" };
+        return { cap: 0, reason: "Hard Requirement CONFLICT: metadata explicitly contradicts query hard requirement" };
     }
     if (violations.critical >= 2) {
         return { cap: CAPS.CRITICAL_HARD_VIOLATIONS_2, reason: `${violations.critical} critical hard requirements NOT_SATISFIED` };
     }
     if (violations.critical === 1) {
-        return { cap: CAPS.CRITICAL_HARD_VIOLATION_1, reason: "1 critical hard requirement NOT_SATISFIED" };
+        return { cap: CAPS.CRITICAL_HARD_VIOLATION_1, reason: "1 critical hard requirement NOT_SATISFIED`" };
     }
     if (violations.any >= 3) {
         return { cap: CAPS.MULTIPLE_SOFT_VIOLATIONS, reason: `${violations.any} hard requirements missing (non-critical)` };
@@ -137,8 +137,8 @@ function assignMatchLevel(
     requirementCoverage: number,
     hardConstraintScore: number
 ): MatchLevel {
-    // NO_MATCH: domain conflict or score too low
-    if (violations.hasConflict && score < 20) return "NO_MATCH";
+    // NO_MATCH: hard constraint conflict or score zero/too low
+    if (violations.hasConflict || score <= 0) return "NO_MATCH";
     if (score < 20) return "NO_MATCH";
 
     // WEAK_MATCH: broad semantic relation only

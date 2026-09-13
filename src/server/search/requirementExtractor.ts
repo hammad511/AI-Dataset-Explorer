@@ -67,9 +67,15 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
     if (negativeRequirements.length) add(requirements, hardRequirementIds, softRequirementIds, 'req_negative', 'OTHER', negativeRequirements.join(', '), `Excluded concepts: ${negativeRequirements.join(', ')}`, true, 0.9, 'explicit');
     if (/prefer|preferred|ideally|would like/i.test(lower)) preferences.push('user preference stated');
 
-    const isLongitudinal = /longitudinal|multi[- ]?timepoint|follow[- ]?up|time series|temporal/i.test(lower);
+    const isLongitudinal = /longitudinal|multi[- ]?timepoint|follow[- ]?up|progression over|serial\s*scan|repeat\s*scan/i.test(lower);
+    if (isLongitudinal) {
+        add(requirements, hardRequirementIds, softRequirementIds, 'req_longitudinal', 'LONGITUDINAL', 'longitudinal', 'Longitudinal multi-timepoint data structure required', true, 0.95, 'explicit');
+    }
     const isMultimodal = /multimodal|multi[- ]modal|multiple modalities/i.test(lower);
-    const hasClinicalData = /clinical|patient|ehr|electronic health|medical record/i.test(lower);
+    const hasClinicalData = /clinical|patient|ehr|electronic health|medical record|clinical variable|progression label/i.test(lower);
+    if (hasClinicalData) {
+        add(requirements, hardRequirementIds, softRequirementIds, 'req_clinical', 'CLINICAL', 'patient clinical data', 'Patient clinical cohort data required', true, 0.90, 'explicit');
+    }
     const hasClassImbalance = /class imbalance|imbalanced|rare class/i.test(lower);
     const hasMissingData = /missing data|missing values?|incomplete/i.test(lower);
     const gpu = Number(lower.match(/(\d+)\s*gb(?:\s*(?:vram|gpu|memory))?\b/i)?.[1] || '') || null;
@@ -94,8 +100,9 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
 }
 
 const profileCache = new Map<string, RequirementProfile>();
-export function getRequirementProfile(rawQuery: string): RequirementProfile {
-    const key = rawQuery.trim();
+export function getRequirementProfile(rawInput: string | any): RequirementProfile {
+    const rawQuery = typeof rawInput === 'string' ? rawInput : (rawInput?.rawQuery || rawInput?.query || '');
+    const key = (rawQuery || '').trim();
     const cached = profileCache.get(key);
     if (cached) return cached;
     const profile = extractRequirementProfile(key);

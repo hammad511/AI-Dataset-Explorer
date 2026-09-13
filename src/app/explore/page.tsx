@@ -389,88 +389,13 @@ function ExploreContent() {
 
     const bestModel: any = useMemo(() => {
         if (summary?.bestModel) return summary.bestModel;
-        const validModels = models.filter(m => (m.matchScore ?? 100) > MIN_SCORE);
+        const validModels = models.filter(m => (m.matchScore ?? 0) > MIN_SCORE && !m.rejected);
         if (validModels.length > 0) return validModels[0];
-
-        // Construct generalized foundation/backbone baseline when 0 fine-tuned models exist
-        const qText = `${submittedQuery} ${searchInput} ${sessionQuery} ${analysis?.domain || ''} ${analysis?.data_modality || ''}`.toLowerCase();
-        const is3D = /3d|volumetric|nii|dicom|ct|mri/i.test(qText);
-        const isMedical = /mri|ct|x.?ray|ultrasound|segmentation|tumor|organ|lesion|medical|biomedical|abdominal|brain|lung|chest|cardiac/i.test(qText);
-        const isAudio = /audio|speech|voice|sound|wav|emotion/i.test(qText);
-        const isTabular = /tabular|csv|fraud|credit|financial|table/i.test(qText);
-
-        if (isMedical && is3D) {
-            return {
-                id: 'monai/swin-unetr',
-                name: 'monai/swin-unetr',
-                architecture: 'MONAI 3D Swin UNETR (Vision Transformer)',
-                description: 'No fine-tuned checkpoints found specifically for abdominal MRI tumors; recommending standard 3D volumetric backbone for transfer learning.',
-                matchScore: 88,
-                pipeline: 'image-segmentation',
-                task: '3D Multi-Organ / Tumor Segmentation',
-                url: 'https://huggingface.co/monai/swin-unetr',
-                isArchitecturalBaseline: true,
-                badge: 'Architectural Baseline: MONAI 3D Swin UNETR (Domain General)',
-                helperSubtitle: 'No fine-tuned checkpoints found specifically for abdominal MRI tumors; recommending standard 3D volumetric backbone for transfer learning.',
-            };
-        } else if (isMedical) {
-            return {
-                id: 'microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
-                name: 'microsoft/BiomedCLIP',
-                architecture: 'BiomedCLIP (ViT + PubMedBERT)',
-                description: 'Pre-trained biomedical vision-language foundation model for clinical transfer learning.',
-                matchScore: 82,
-                pipeline: 'zero-shot-image-classification',
-                task: 'Biomedical Classification',
-                url: 'https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224',
-                isArchitecturalBaseline: true,
-                badge: 'Biomedical Baseline: Microsoft BiomedCLIP',
-                helperSubtitle: 'Recommending standard biomedical foundation model for transfer learning.',
-            };
-        } else if (isAudio) {
-            return {
-                id: 'openai/whisper-large-v3',
-                name: 'openai/whisper-large-v3',
-                architecture: 'Whisper Audio Transformer',
-                description: 'State-of-the-art multilingual speech and acoustic foundation model.',
-                matchScore: 85,
-                pipeline: 'automatic-speech-recognition',
-                task: 'Speech & Audio Recognition',
-                url: 'https://huggingface.co/openai/whisper-large-v3',
-                isArchitecturalBaseline: true,
-                badge: 'Audio Foundation Baseline: Whisper Large v3',
-                helperSubtitle: 'Universal audio representation backbone for acoustic classification.',
-            };
-        } else if (isTabular) {
-            return {
-                id: 'amazon/chronos-t5-base',
-                name: 'amazon/chronos-t5-base',
-                architecture: 'Chronos T5 Tabular Transformer',
-                description: 'Pretrained foundation model for tabular and sequence classification.',
-                matchScore: 80,
-                pipeline: 'tabular-classification',
-                task: 'Tabular Classification',
-                url: 'https://huggingface.co/amazon/chronos-t5-base',
-                isArchitecturalBaseline: true,
-                badge: 'Tabular Foundation Baseline: Chronos T5',
-                helperSubtitle: 'Foundation model for structured tabular feature encoding.',
-            };
-        }
-
-        return {
-            id: 'google/vit-base-patch16-224',
-            name: 'google/vit-base-patch16-224',
-            architecture: 'Vision Transformer (ViT-Base)',
-            description: 'Standard Vision Transformer pre-trained backbone for transfer learning.',
-            matchScore: 82,
-            pipeline: 'image-classification',
-            task: 'Vision Classification',
-            url: 'https://huggingface.co/google/vit-base-patch16-224',
-            isArchitecturalBaseline: true,
-            badge: 'Vision Baseline: Google ViT-Base',
-            helperSubtitle: 'Standard visual backbone architecture for transfer learning.',
-        };
-    }, [summary, models, submittedQuery, searchInput, sessionQuery, analysis]);
+        // If models contains an unverified fallback, return it
+        const fallback = models.find(m => (m as any).isArchitecturalBaseline || (m as any).matchCategory === 'UNVERIFIED_FALLBACK');
+        if (fallback) return fallback;
+        return null;
+    }, [summary, models]);
 
     return (
         <main className="min-h-screen flex flex-col bg-page text-primary selection:bg-accent selection:text-white relative">
@@ -1155,17 +1080,23 @@ function ExploreContent() {
                                             <div>
                                                 <div className="flex items-center justify-between gap-2">
                                                     <span className={`text-[10px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${
-                                                        bestModel.isArchitecturalBaseline
+                                                        bestModel.isArchitecturalBaseline || bestModel.matchCategory === 'UNVERIFIED_FALLBACK'
                                                             ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
                                                             : "status-badge-cyan"
                                                     }`}>
-                                                        {bestModel.isArchitecturalBaseline
-                                                            ? (bestModel.badge || "🏛️ Architectural Baseline: MONAI 3D Swin UNETR (Domain General)")
+                                                        {bestModel.isArchitecturalBaseline || bestModel.matchCategory === 'UNVERIFIED_FALLBACK'
+                                                            ? (bestModel.badge || "Unverified Fallback Suggestion")
                                                             : "🤖 Top Compatible Model"}
                                                     </span>
-                                                    <span className="text-xs font-bold text-status-cyan">
-                                                        {bestModel.matchScore ?? 75}% Match
-                                                    </span>
+                                                    {bestModel.isArchitecturalBaseline || bestModel.matchCategory === 'UNVERIFIED_FALLBACK' || !bestModel.matchScore ? (
+                                                        <span className="text-xs font-bold text-amber-400">
+                                                            Unverified Fallback Suggestion
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs font-bold text-status-cyan">
+                                                            {bestModel.matchScore}% Match
+                                                        </span>
+                                                    )}
                                                 </div>
 
                                                 <h3 className="text-lg font-bold text-primary mt-3 truncate" title={bestModel.name || bestModel.id}>

@@ -40,7 +40,10 @@ export interface ModelItem {
     parameters?: string | number | null;
     isPretrainedCheckpointVerified?: boolean;
     checkpointStatusLabel?: string;
-    matchCategory?: 'EXACT_MATCH' | 'PARTIAL_MATCH' | 'RELATED_RESOURCE';
+    isArchitecturalBaseline?: boolean;
+    badge?: string;
+    helperSubtitle?: string;
+    matchCategory?: 'EXACT_MATCH' | 'PARTIAL_MATCH' | 'RELATED_RESOURCE' | 'UNVERIFIED_FALLBACK';
     whyMatches?: string[];
     verifiedClaims?: string[];
     unverifiedClaims?: string[];
@@ -125,13 +128,21 @@ export default function ModelCard({ model }: ModelCardProps) {
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <ConfidenceBadge score={model.confidenceScore} showLabel={false} />
+                        {!(model.isArchitecturalBaseline || model.matchCategory === 'UNVERIFIED_FALLBACK') && (
+                            <ConfidenceBadge score={model.confidenceScore} showLabel={false} />
+                        )}
 
-                        <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getScoreBadgeClass()}`}>
-                            {model.matchLevel
-                                ? `${model.matchLevel.replace(/_/g, ' ')} • ${score}`
-                                : `${score}/100 Match`}
-                        </span>
+                        {model.isArchitecturalBaseline || model.matchCategory === 'UNVERIFIED_FALLBACK' ? (
+                            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/30">
+                                Unverified Fallback Suggestion
+                            </span>
+                        ) : (
+                            <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getScoreBadgeClass()}`}>
+                                {model.matchLevel
+                                    ? `${model.matchLevel.replace(/_/g, ' ')} • ${score}`
+                                    : `${score}/100 Match`}
+                            </span>
+                        )}
 
                         <button
                             type="button"

@@ -15,6 +15,8 @@ import { advancedResearchSearch } from './searchEngine';
 import { queryFastApiRecommend } from './fastapiClient';
 import { getFallbackBaselineModels } from './modelsFallback';
 import { scoreCandidate } from './scoring';
+import { verifyCandidate } from './verification';
+import { getRequirementProfile } from './requirementExtractor';
 
 export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
     // Run both pipelines concurrently for speed and merge them
@@ -77,14 +79,18 @@ export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
             for (const rejected of (res.rejectedResults || [])) {
                 const candidate = rejected.candidate as any;
                 if (candidate?.type !== 'dataset' || !candidate.id || existingDatasetIds.has(candidate.id)) continue;
+                const isContradiction = rejected.stage === 'CONTRADICTION_VETO'
+                    || rejected.stage === 'STAGE_6_CONTRADICTION'
+                    || /contradict|fatal/i.test(rejected.reason || '');
                 datasets.push({
                     ...candidate,
                     type: 'dataset',
                     url: candidate.url || candidate.canonical_url || '#',
-                    matchScore: Math.max(20, candidate.matchScore ?? 20),
-                    confidenceScore: candidate.confidenceScore ?? 20,
+                    matchScore: isContradiction ? 0 : Math.max(20, candidate.matchScore ?? 20),
+                    confidenceScore: isContradiction ? 0 : (candidate.confidenceScore ?? 20),
                     tier: 'Tier D',
-                    matchCategory: 'PARTIAL_MATCH',
+                    matchCategory: isContradiction ? 'NO_MATCH' : 'PARTIAL_MATCH',
+                    matchLevel: isContradiction ? 'NO_MATCH' : 'PARTIAL_MATCH',
                     evidenceLevel: 'PARTIAL',
                     rejected: true,
                     rejectionReason: rejected.reason,
@@ -99,9 +105,26 @@ export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
         if (models.length === 0 && res.diagnostics?.parsedQuery) {
             const baselines = getFallbackBaselineModels(res.diagnostics.parsedQuery as any);
             for (const b of baselines) {
+                // Hard verification: Reject any model with dimensionality or modality contradictions
+                const verification = verifyCandidate(b, res.diagnostics.parsedQuery as any);
+                if (!verification.passed) {
+                    continue; // HARD VETO: Do not recommend incompatible 3D models for 2D queries or mismatched tasks
+                }
                 const scored = scoreCandidate(b, res.diagnostics.parsedQuery as any);
                 if (scored.matchScore > 0 && !scored.matchBreakdown?.disqualifications?.length) {
                     models.push(scored as unknown as UnifiedCandidate);
+                } else {
+                    // Display NO percentage, labeled clearly as unverified fallback suggestion
+                    const unverified = {
+                        ...b,
+                        matchScore: 0,
+                        confidenceScore: 0,
+                        tier: 'Tier D',
+                        matchCategory: 'UNVERIFIED_FALLBACK',
+                        badge: 'Unverified Fallback Suggestion',
+                        matchReason: 'Unverified fallback architecture suggestion for transfer learning.',
+                    };
+                    models.push(unverified as unknown as UnifiedCandidate);
                 }
             }
         }
