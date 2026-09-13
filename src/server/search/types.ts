@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Search Engine Unified Types & Schemas
  *
  * Core data contracts for the Evidence-Aware AI Research Retrieval and Recommendation Engine.
@@ -228,6 +228,7 @@ export interface RejectedResult {
     candidate: NormalizedSearchResult;
     reason: string;
     conflictType: 'anatomy' | 'modality' | 'task' | 'domain' | 'dimensionality' | 'other';
+    stage?: string;
 }
 
 export interface UnifiedCandidate {
