@@ -46,6 +46,17 @@ export interface CrossrefResponse {
 }
 
 const TIMEOUT_MS = 7500;
+const CROSSREF_SELECT_FIELDS =
+    'DOI,title,author,published,abstract,is-referenced-by-count,URL,container-title';
+
+export function getCrossrefContactEmail(): string {
+    return (
+        process.env.CONTACT_EMAIL ||
+        process.env.OPENALEX_EMAIL ||
+        process.env.CROSSREF_EMAIL ||
+        'research@example.com'
+    ).trim();
+}
 
 export async function searchCrossref(
     query: string,
@@ -62,8 +73,8 @@ export async function searchCrossref(
         return cached;
     }
 
-    const mailto = process.env.CROSSREF_EMAIL || 'support@datasetexplorer.local';
-    const endpoint = `https://api.crossref.org/works?query=${encodeURIComponent(cleanQuery)}&rows=${limit}&mailto=${encodeURIComponent(mailto)}`;
+    const mailto = getCrossrefContactEmail();
+    const endpoint = `https://api.crossref.org/works?query=${encodeURIComponent(cleanQuery)}&rows=${limit}&select=${encodeURIComponent(CROSSREF_SELECT_FIELDS)}&mailto=${encodeURIComponent(mailto)}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -72,7 +83,7 @@ export async function searchCrossref(
         const res = await fetch(endpoint, {
             headers: {
                 'Accept': 'application/json',
-                'User-Agent': `AIDatasetExplorer/2.0 (mailto:${mailto})`,
+                'User-Agent': `AI-Dataset-Explorer/1.0 (mailto:${mailto})`,
             },
             signal: controller.signal,
             next: { revalidate: 3600 },

@@ -25,12 +25,57 @@ export interface ArxivPaperRaw {
 }
 
 const TIMEOUT_MS = 7500;
+const ARXIV_MIN_INTERVAL_MS = 3000; // Minimum 3-second cooldown per ArXiv terms of use
+
+let lastArxivRequestTime = 0;
+let arxivThrottleChain: Promise<void> = Promise.resolve();
+
+export function getPoliteContactEmail(): string {
+    return (
+        process.env.CONTACT_EMAIL ||
+        process.env.OPENALEX_EMAIL ||
+        process.env.CROSSREF_EMAIL ||
+        'research@example.com'
+    ).trim();
+}
+
+export function getArxivUserAgent(): string {
+    return `AI-Dataset-Explorer/1.0 (mailto:${getPoliteContactEmail()})`;
+}
+
+/**
+ * Normalizes an ArXiv identifier by stripping URL prefixes and version suffixes (`v1`, `v2`, etc.).
+ */
+export function normalizeArxivIdentifier(rawId: string): string {
+    if (!rawId) return '';
+    const m = rawId
+        .trim()
+        .match(/(?:abs\/|pdf\/|arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*)?([0-9]{4}\.[0-9]{4,5}|[a-z\-]+(?:\.[a-z\-]+)?\/[0-9]{7})(?:v[0-9]+)?/i);
+    if (m && m[1]) {
+        return m[1].replace(/v[0-9]+$/i, '');
+    }
+    return rawId.trim().replace(/^https?:\/\/arxiv\.org\/(?:abs|pdf)\//i, '').replace(/\.pdf$/i, '').replace(/v[0-9]+$/i, '');
+}
+
+export async function waitForArxivRateSlot(): Promise<void> {
+    const nextSlot = arxivThrottleChain.then(async () => {
+        const now = Date.now();
+        const elapsed = now - lastArxivRequestTime;
+        if (lastArxivRequestTime > 0 && elapsed < ARXIV_MIN_INTERVAL_MS) {
+            await new Promise((r) => setTimeout(r, ARXIV_MIN_INTERVAL_MS - elapsed));
+        }
+        lastArxivRequestTime = Date.now();
+    });
+    arxivThrottleChain = nextSlot.catch(() => {});
+    await nextSlot;
+}
 
 /**
  * Lightweight XML tag extractor for arXiv Atom feed.
  */
-function parseArxivAtomXml(xmlText: string): ArxivPaperRaw[] {
+export function parseArxivAtomXml(xmlText: string): ArxivPaperRaw[] {
     const papers: ArxivPaperRaw[] = [];
+    const seenBaseIds = new Set<string>();
     const entryRegex = /<entry[\s\S]*?<\/entry>/gi;
     const entries = xmlText.match(entryRegex) || [];
 
@@ -38,16 +83,16 @@ function parseArxivAtomXml(xmlText: string): ArxivPaperRaw[] {
         // ID
         const idMatch = entry.match(/<id>(.*?)<\/id>/i);
         const rawId = idMatch ? idMatch[1].trim() : '';
-        const arxivIdMatch = rawId.match(/(?:abs\/|arxiv\.org\/abs\/)?([0-9]+\.[0-9]+(?:v[0-9]+)?|[a-z\-]+(?:\.[a-z]+)?\/[0-9]+)/i);
-        const arxivId = arxivIdMatch ? arxivIdMatch[1] : rawId;
+        const arxivId = normalizeArxivIdentifier(rawId);
+        if (!arxivId || seenBaseIds.has(arxivId.toLowerCase())) continue;
 
         // Title
         const titleMatch = entry.match(/<title[\s\S]*?>([\s\S]*?)<\/title>/i);
-        let title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : 'Untitled arXiv Paper';
+        const title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : 'Untitled arXiv Paper';
 
         // Summary
         const summaryMatch = entry.match(/<summary[\s\S]*?>([\s\S]*?)<\/summary>/i);
-        let summary = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
+        const summary = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
 
         // Published date
         const pubMatch = entry.match(/<published>(.*?)<\/published>/i);
@@ -63,17 +108,9 @@ function parseArxivAtomXml(xmlText: string): ArxivPaperRaw[] {
             }
         }
 
-        // Links
-        let pdfUrl: string | null = null;
-        let landingUrl = rawId || `https://arxiv.org/abs/${arxivId}`;
-
-        const pdfLinkMatch = entry.match(/<link[^>]*?title="pdf"[^>]*?href="(.*?)"/i)
-            || entry.match(/<link[^>]*?href="(.*?)"[^>]*?title="pdf"/i);
-        if (pdfLinkMatch) {
-            pdfUrl = pdfLinkMatch[1].trim().replace(/^http:/, 'https:');
-        } else if (arxivId) {
-            pdfUrl = `https://arxiv.org/pdf/${arxivId}.pdf`;
-        }
+        // Links — canonical direct PDF URL and HTTPS abstract URL using normalized versionless arxivId
+        const landingUrl = `https://arxiv.org/abs/${arxivId}`;
+        const pdfUrl = `https://arxiv.org/pdf/${arxivId}.pdf`;
 
         // Primary Category
         const catMatch = entry.match(/<arxiv:primary_category[^>]*?term="(.*?)"/i);
@@ -90,16 +127,17 @@ function parseArxivAtomXml(xmlText: string): ArxivPaperRaw[] {
         }
 
         // DOI if published
-        const doiMatch = entry.match(/<arxiv:doi>(.*?)<\/arxiv:doi>/i);
+        const doiMatch = entry.match(/<arxiv:doi[^>]*>(.*?)<\/arxiv:doi>/i);
         const doi = doiMatch ? doiMatch[1].trim() : undefined;
 
         // Journal ref if published
-        const jrMatch = entry.match(/<arxiv:journal_ref>(.*?)<\/arxiv:journal_ref>/i);
+        const jrMatch = entry.match(/<arxiv:journal_ref[^>]*>(.*?)<\/arxiv:journal_ref>/i);
         const journalRef = jrMatch ? jrMatch[1].trim() : undefined;
 
         if (title && arxivId) {
+            seenBaseIds.add(arxivId.toLowerCase());
             papers.push({
-                id: rawId,
+                id: landingUrl,
                 arxivId,
                 title,
                 summary,
@@ -148,14 +186,16 @@ export async function searchArxiv(
 
     const endpoint = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(sanitized)}&start=0&max_results=${limit}&sortBy=relevance&sortOrder=descending`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
     try {
+        await waitForArxivRateSlot();
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
         const res = await fetch(endpoint, {
             headers: {
                 'Accept': 'application/atom+xml, application/xml, text/xml',
-                'User-Agent': 'AIDatasetExplorer/2.0 (arXiv query client)',
+                'User-Agent': getArxivUserAgent(),
             },
             signal: controller.signal,
             next: { revalidate: 3600 },
@@ -185,10 +225,9 @@ export async function searchArxiv(
 
         return papers;
     } catch (err: any) {
-        clearTimeout(timeoutId);
-        const isAbort = err.name === 'AbortError';
-        if (trace) trace.arxiv = { success: false, reason: isAbort ? 'Request timed out' : err.message };
-        console.warn(`[ARXIV] Fetch failed for query "${cleanQuery}":`, err.message);
+        const isAbort = err?.name === 'AbortError';
+        if (trace) trace.arxiv = { success: false, reason: isAbort ? 'Request timed out' : err?.message };
+        console.warn(`[ARXIV] Fetch failed for query "${cleanQuery}":`, err?.message || err);
         return [];
     }
 }

@@ -184,15 +184,19 @@ export async function classifyIntent(query: string, apiKey?: string, model?: str
                     result.confidence = 0.6;
                 }
 
-                console.log(`[INTENT] ${result.intent} (${result.confidence}) -> ${result.reason} [via ${response.provider}]`);
+                console.log(`[INTENT] ${result.intent} (${result.confidence}) -> ${result.reason} [via ${response.provider}:${response.model}]`);
                 return result;
             }
-        } catch (e) {
-            console.error('[INTENT] Parse Failed', e);
+        } catch (e: any) {
+            console.error('[INTENT] JSON Parse Failed:', e?.message || e, '| Raw content:', content.slice(0, 300));
         }
         return fallbackIntent;
-    } catch (e) {
-        console.error('[INTENT] LLM Call Failed, using fallback', e);
+    } catch (e: any) {
+        console.error(
+            `[INTENT] Gemini LLM Call Failed (status=${e?.status ?? 'N/A'}, model=${e?.model ?? 'N/A'}):`,
+            e?.message || e,
+            e?.responseBody ? `| Response Body: ${String(e.responseBody).slice(0, 300)}` : ''
+        );
         return fallbackIntent;
     }
 }

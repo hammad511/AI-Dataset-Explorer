@@ -148,7 +148,12 @@ class RecommendationPipelineService:
 
         # ── STAGE 10: Fresh / Latest Research Enrichment ───────────────────────
         latest_research: List[Any] = []
-        if profile.research_constraints.latest_required:
+        needs_fresh_papers = (
+            profile.research_constraints.latest_required
+            or not ranked_papers
+            or ranked_papers[0].score < 60
+        )
+        if needs_fresh_papers:
             ds_name = top_ds.name if top_ds else None
             mdl_name = top_mdl.name if top_mdl else None
             latest_research = await self.fresh_research.search_fresh(
@@ -157,6 +162,13 @@ class RecommendationPipelineService:
                 target_model=mdl_name,
                 limit=6,
             )
+            if latest_research and (not ranked_papers or ranked_papers[0].score < 60):
+                existing_ids = {p.id for p in ranked_papers}
+                for fp in latest_research:
+                    if fp.id not in existing_ids:
+                        ranked_papers.append(fp)
+                        existing_ids.add(fp.id)
+                ranked_papers.sort(key=lambda x: x.score, reverse=True)
 
         # ── STAGE 11: No Direct Match Handling ─────────────────────────────────
         no_direct_match = False

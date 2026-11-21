@@ -1,6 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
+import {
+  FileText,
+  ExternalLink,
+  Pin,
+  PinOff,
+  ThumbsUp,
+  ChevronDown,
+  ChevronUp,
+  Unlock,
+  Quote,
+  BookOpen,
+  Link2,
+} from "lucide-react";
 import type { NormalizedPaper, PaperRelationship } from "@/types/papers";
 import { useSearchSession } from "@/context/SearchSessionContext";
 import EvidenceBadge from "@/components/common/EvidenceBadge";
@@ -10,293 +23,284 @@ import UserFeedbackModal from "@/components/modals/UserFeedbackModal";
 import { QualityTier, EvidenceLevel, MatchBreakdown as MatchBreakdownType } from "@/server/search/types";
 
 interface PaperCardProps {
-    paper: NormalizedPaper & {
-        matchScore?: number;
-        confidenceScore?: number;
-        tier?: QualityTier;
-        evidenceLevel?: EvidenceLevel;
-        matchBreakdown?: MatchBreakdownType;
-        warnings?: string[];
-        matchReason?: string;
-        description?: string;
-        whyMatches?: string[];
-        paperRelationships?: { datasetId?: string; modelId?: string; summary?: string };
-    };
-    onOpenDetails?: (paper: NormalizedPaper) => void;
+  paper: NormalizedPaper & {
+    matchScore?: number;
+    confidenceScore?: number;
+    tier?: QualityTier;
+    evidenceLevel?: EvidenceLevel;
+    matchBreakdown?: MatchBreakdownType;
+    warnings?: string[];
+    matchReason?: string;
+    description?: string;
+    whyMatches?: string[];
+    paperRelationships?: { datasetId?: string; modelId?: string; summary?: string };
+  };
+  onOpenDetails?: (paper: NormalizedPaper) => void;
 }
 
 export default function PaperCard({ paper, onOpenDetails }: PaperCardProps) {
-    const { isAssetPinned, togglePinAsset, query } = useSearchSession();
-    const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const { isAssetPinned, togglePinAsset, query } = useSearchSession();
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [spansExpanded, setSpansExpanded] = useState(false);
 
-    const title = paper.title || "Untitled Research Paper";
-    const paperId = paper.id || title;
-    const isPinned = isAssetPinned(paperId);
-    const score = paper.relevanceScore ?? paper.matchScore ?? 50;
-    const tier = paper.tier || (score >= 85 ? "Tier A" : score >= 70 ? "Tier B" : score >= 50 ? "Tier C" : "Tier D");
+  const title = paper.title || "Untitled Research Paper";
+  const paperId = paper.id || title;
+  const isPinned = isAssetPinned(paperId);
+  const score = paper.relevanceScore ?? paper.matchScore ?? 50;
+  const tier = paper.tier || (score >= 85 ? "Tier A" : score >= 70 ? "Tier B" : score >= 50 ? "Tier C" : "Tier D");
 
-    const handlePin = () => {
-        togglePinAsset({
-            id: paperId,
-            type: 'paper',
-            title,
-            subtitle: `${paper.venue || 'Academic'} · ${paper.year || ''}`,
-            source: paper.venue || 'Research Literature',
-            score,
-            badge: 'Paper',
-            url: paper.paperUrl || paper.pdfUrl || "",
-            data: paper,
-            pinnedAt: Date.now(),
-        });
-    };
+  const handlePin = () => {
+    togglePinAsset({
+      id: paperId,
+      type: "paper",
+      title,
+      subtitle: `${paper.venue || "Academic"} · ${paper.year || ""}`,
+      source: paper.venue || "Research Literature",
+      score,
+      badge: "Paper",
+      url: paper.paperUrl || paper.pdfUrl || "",
+      data: paper,
+      pinnedAt: Date.now(),
+    });
+  };
 
-    const authors = Array.isArray(paper.authors) && paper.authors.length > 0
-        ? paper.authors.slice(0, 3).join(", ") + (paper.authors.length > 3 ? " et al." : "")
-        : "Authors not available";
+  const authors =
+    Array.isArray(paper.authors) && paper.authors.length > 0
+      ? paper.authors.slice(0, 3).join(", ") + (paper.authors.length > 3 ? " et al." : "")
+      : "Authors unstated";
 
-    const year = paper.year || (paper.publicationDate ? paper.publicationDate.slice(0, 4) : "Not available");
-    const venue = paper.venue || "Academic Index";
-    const abstract = paper.tldr || paper.abstract || paper.description || "Abstract not available.";
-    const citations = typeof paper.citationCount === "number"
-        ? `${paper.citationCount.toLocaleString()} citations`
-        : "Citations unstated";
+  const year = paper.year || (paper.publicationDate ? paper.publicationDate.slice(0, 4) : "Recent");
+  const venue = paper.venue || "Academic Index";
+  const abstract = paper.tldr || paper.abstract || paper.description || "Abstract unavailable.";
+  const citations = typeof paper.citationCount === "number" ? paper.citationCount.toLocaleString() : "0";
 
-    const getRelationshipBadge = (rel: PaperRelationship | string | undefined, paperType?: string) => {
-        const typeOrRel = (paperType || rel || "").toUpperCase();
+  const getRelBadge = (rel: PaperRelationship | string | undefined, paperType?: string) => {
+    const val = (paperType || rel || "").toUpperCase();
+    if (val.includes("DATASET") || val === "EXACT_DATASET") return { label: "EXACT DATASET", cls: "status-badge-emerald" };
+    if (val.includes("MODEL") || val === "EXACT_MODEL") return { label: "EXACT MODEL", cls: "status-badge-cyan" };
+    if (val === "DIRECTLY_RELATED") return { label: "DIRECTLY RELATED", cls: "status-badge-violet" };
+    if (val.includes("BENCHMARK")) return { label: "BENCHMARK", cls: "status-badge-amber" };
+    return { label: "LITERATURE", cls: "bg-card-subtle text-muted border-subtle" };
+  };
 
-        if (typeOrRel.includes("FOUNDATIONAL")) {
-            return { label: "FOUNDATIONAL", className: "bg-purple-500/20 text-purple-400 border-purple-500/40", icon: "🏛️" };
-        }
-        if (typeOrRel.includes("DATASET") || typeOrRel === "EXACT_DATASET") {
-            return { label: "DATASET-SPECIFIC", className: "status-badge-emerald", icon: "📦" };
-        }
-        if (typeOrRel.includes("MODEL") || typeOrRel === "EXACT_MODEL") {
-            return { label: "MODEL-SPECIFIC", className: "status-badge-cyan", icon: "🤖" };
-        }
-        if (typeOrRel.includes("BENCHMARK") || typeOrRel.includes("CHALLENGE")) {
-            return { label: "BENCHMARK", className: "bg-amber-500/20 text-amber-400 border-amber-500/40", icon: "🏆" };
-        }
-        if (typeOrRel.includes("LATEST")) {
-            return { label: "LATEST RESEARCH", className: "bg-blue-500/20 text-blue-400 border-blue-500/40", icon: "⚡" };
-        }
-        if (typeOrRel.includes("SURVEY") || typeOrRel.includes("REVIEW")) {
-            return { label: "SURVEY", className: "bg-indigo-500/20 text-indigo-400 border-indigo-500/40", icon: "📚" };
-        }
-        if (typeOrRel === "DIRECTLY_RELATED") {
-            return { label: "DIRECTLY RELATED", className: "status-badge-violet", icon: "🎯" };
-        }
-        return { label: "METHOD", className: "bg-card-subtle text-muted border-subtle", icon: "🔬" };
-    };
+  const relBadge = getRelBadge(paper.relationship, (paper as any).paper_type || (paper as any).paperType);
 
-    const relBadge = getRelationshipBadge(paper.relationship, (paper as any).paper_type || (paper as any).paperType);
+  const evidenceQuotes: string[] = [
+    ...(paper.relationshipEvidence ? [paper.relationshipEvidence] : []),
+    ...(paper.whyMatches || []),
+    ...(Array.isArray(paper.whyRelevant) ? paper.whyRelevant : paper.whyRelevant ? [paper.whyRelevant] : []),
+  ].filter(Boolean);
 
-    const getScoreBadgeClass = (s: number) => {
-        if (s >= 85) return "status-badge-emerald";
-        if (s >= 70) return "status-badge-cyan";
-        return "status-badge-amber";
-    };
+  return (
+    <div
+      className={`group rounded-2xl p-4 sm:p-5 flex flex-col justify-between transition-lab ${
+        isPinned ? "obsidian-card border-accent bg-accent-subtle/40 shadow-accent-sm" : "obsidian-card-interactive"
+      }`}
+    >
+      <div>
+        {/* Top Metadata Strip */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border uppercase ${relBadge.cls}`}>
+              {relBadge.label}
+            </span>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-card-subtle border border-subtle text-secondary">
+              {tier}
+            </span>
+            <EvidenceBadge level={paper.evidenceLevel || "SUPPORTED"} />
+          </div>
 
-    const getTierBadgeClass = (t: QualityTier) => {
-        if (t === "Tier A") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
-        if (t === "Tier B") return "bg-cyan-500/20 text-cyan-400 border-cyan-500/40";
-        if (t === "Tier C") return "bg-amber-500/20 text-amber-400 border-amber-500/40";
-        return "bg-zinc-500/20 text-zinc-400 border-zinc-500/40";
-    };
-
-    return (
-        <div className={`group rounded-2xl border p-5 flex flex-col justify-between transition-all duration-300 hover:shadow-lg relative ${
-            isPinned
-                ? "border-accent bg-accent-subtle/30 shadow-sm"
-                : "border-subtle bg-card hover:bg-card-hover hover:border-strong"
-        }`}>
-            <div>
-                {/* Top header row: Category / Relationship Badge + Tier + Evidence + Year + Pin */}
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        <span
-                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border uppercase tracking-wider flex items-center gap-1 ${relBadge.className}`}
-                            title={paper.relationshipEvidence || relBadge.label}
-                        >
-                            <span>{relBadge.icon}</span>
-                            <span>{relBadge.label}</span>
-                        </span>
-
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getTierBadgeClass(tier)}`}>
-                            {tier}
-                        </span>
-
-                        <EvidenceBadge level={paper.evidenceLevel || "SUPPORTED"} />
-
-                        {paper.isPreprint && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase tracking-wider">
-                                Preprint
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {paper.confidenceScore !== undefined && (
-                            <ConfidenceBadge score={paper.confidenceScore} showLabel={false} />
-                        )}
-
-                        <span className="text-xs font-mono font-bold text-muted">
-                            {year}
-                        </span>
-
-                        <button
-                            type="button"
-                            onClick={handlePin}
-                            className={`text-[11px] px-2 py-0.5 rounded-lg border font-semibold transition-all duration-200 flex items-center gap-1 ${
-                                isPinned
-                                    ? "bg-accent text-white shadow-accent-sm border-transparent"
-                                    : "bg-card-subtle text-muted border-subtle hover:text-primary hover:border-strong"
-                            }`}
-                            title={isPinned ? "Pinned to Benchmark Lab" : "Pin paper to Benchmark Lab"}
-                        >
-                            <span>{isPinned ? "✓" : "📌"}</span>
-                        </button>
-                    </div>
-                </div>
-
-                {/* Paper Title */}
-                <h3
-                    onClick={() => onOpenDetails?.(paper)}
-                    className="text-base font-bold text-primary mt-3 cursor-pointer group-hover:text-accent transition-colors line-clamp-2 leading-snug"
-                    title={title}
-                >
-                    {title}
-                </h3>
-
-                {/* Authors & Venue */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-muted">
-                    <span className="text-secondary font-medium truncate max-w-[220px]">
-                        {authors}
-                    </span>
-                    <span className="text-faint">·</span>
-                    <span className="text-muted truncate max-w-[180px]" title={venue}>
-                        {venue}
-                    </span>
-                </div>
-
-                {/* Abstract Preview Box */}
-                <div className="p-3.5 rounded-xl bg-card-subtle border border-subtle mt-3 shadow-xs">
-                    <p className="text-xs text-muted line-clamp-3 leading-relaxed">
-                        {abstract}
-                    </p>
-                </div>
-
-                {/* Evidence Verification Checklist */}
-                {paper.whyMatches && paper.whyMatches.length > 0 && (
-                    <div className="mt-2.5 p-2 rounded-lg bg-card-subtle/50 border border-subtle/60 text-[11px] space-y-1">
-                        {paper.whyMatches.slice(0, 2).map((why, idx) => (
-                            <div key={idx} className="flex items-start gap-1.5 text-emerald-400">
-                                <span className="text-[10px] mt-0.5">✓</span>
-                                <span className="leading-tight">{why}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Cross-Entity Paper Relationship */}
-                {paper.paperRelationships?.summary && (
-                    <div className="mt-2 px-2.5 py-1.5 rounded-lg border text-[11px] bg-cyan-500/10 text-cyan-400 border-cyan-500/30 flex items-center gap-1.5">
-                        <span>🔗</span>
-                        <span>{paper.paperRelationships.summary}</span>
-                    </div>
-                )}
-
-                {/* AI Relevance Score & Citations */}
-                <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-subtle text-xs">
-                    <div
-                        className="flex items-center gap-1.5 group/score relative cursor-help"
-                        title="Relevance calculated from multi-factor evidence matching against target anatomy, modality, task, and benchmarks."
-                    >
-                        <span className="text-[11px] text-muted font-bold uppercase tracking-wider">AI Relevance:</span>
-                        <span className={`text-xs font-black px-2 py-0.5 rounded-md border ${getScoreBadgeClass(score)}`}>
-                            {score}%
-                        </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[11px] text-muted">
-                        <span title={`Citation count from ${paper.citationSource || 'Scholarly Index'}`}>
-                            📊 {citations}
-                        </span>
-                        {paper.openAccess && (
-                            <span className="text-emerald-400 font-semibold" title="Open Access Publication">
-                                🔓 OA
-                            </span>
-                        )}
-                    </div>
-                </div>
-
-                {/* Expandable Match Breakdown if present */}
-                <MatchBreakdown
-                    breakdown={paper.matchBreakdown}
-                    evidence={[]}
-                    warnings={paper.warnings || []}
-                    matchReason={paper.matchReason || paper.relationshipEvidence || undefined}
-                    overallScore={score}
-                />
-            </div>
-
-            {/* Action Buttons & Feedback */}
-            <div className="mt-4 pt-3 border-t border-subtle flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setFeedbackModalOpen(true)}
-                        className="text-xs text-muted hover:text-primary transition flex items-center gap-1 px-2 py-1 rounded hover:bg-card-subtle"
-                        title="Rate relevance of this search result"
-                    >
-                        <span>👍/👎</span>
-                        <span className="text-[11px]">Feedback</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => onOpenDetails?.(paper)}
-                        className="px-2.5 py-1.5 rounded-lg bg-card-subtle hover:bg-card border border-subtle text-primary font-bold text-xs transition flex items-center gap-1"
-                    >
-                        <span>🔍</span> Read Details
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                    {paper.pdfUrl && (
-                        <a
-                            href={paper.pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 font-bold text-xs transition flex items-center gap-1"
-                            title="Open direct PDF"
-                        >
-                            <span>📄</span> PDF
-                        </a>
-                    )}
-                    {paper.paperUrl && (
-                        <a
-                            href={paper.paperUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-accent text-white font-bold text-xs shadow-accent-sm hover:brightness-110 transition flex items-center gap-1"
-                            title="View original publisher/repository page"
-                        >
-                            <span>Source</span>
-                            <span>↗</span>
-                        </a>
-                    )}
-                </div>
-            </div>
-
-            {/* User Feedback Modal */}
-            <UserFeedbackModal
-                isOpen={feedbackModalOpen}
-                onClose={() => setFeedbackModalOpen(false)}
-                candidateId={paperId}
-                candidateTitle={title}
-                candidateType="paper"
-                searchQuery={query}
-            />
+          <div className="flex items-center gap-1.5">
+            {paper.confidenceScore !== undefined && (
+              <ConfidenceBadge score={paper.confidenceScore} showLabel={false} />
+            )}
+            <span className="text-[11px] font-mono font-semibold text-primary tabular-nums">{year}</span>
+            <button
+              type="button"
+              onClick={handlePin}
+              className={`text-[11px] px-2 py-1 rounded-lg border font-semibold transition-lab flex items-center gap-1 ${
+                isPinned
+                  ? "bg-accent text-slate-950 border-transparent font-bold"
+                  : "bg-card-subtle text-muted border-subtle hover:text-primary hover:border-strong"
+              }`}
+              title={isPinned ? "Pinned to Benchmark Matrix" : "Pin paper"}
+            >
+              {isPinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+            </button>
+          </div>
         </div>
-    );
+
+        {/* Title */}
+        <h3
+          onClick={() => onOpenDetails?.(paper)}
+          className="text-sm sm:text-base font-bold text-primary mt-3 cursor-pointer group-hover:text-accent-from transition-colors line-clamp-2 leading-snug"
+        >
+          {title}
+        </h3>
+
+        {/* Authors & Venue */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11px] text-muted">
+          <span className="text-secondary truncate max-w-[220px]">{authors}</span>
+          <span className="text-faint">·</span>
+          <span className="font-mono text-faint truncate max-w-[180px]" title={venue}>
+            {venue}
+          </span>
+        </div>
+
+        {/* Abstract Preview */}
+        <div className="p-3 rounded-xl bg-page/70 border border-subtle mt-2.5">
+          <p className="text-xs text-muted line-clamp-3 leading-relaxed">{abstract}</p>
+        </div>
+
+        {/* Citations, DOI / arXiv IDs & Relevance Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] font-mono">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="px-2 py-0.5 rounded-md bg-card-subtle border border-subtle text-primary font-semibold tabular-nums">
+              {citations} citations
+            </span>
+            {paper.doi && (
+              <span className="px-2 py-0.5 rounded-md bg-card-subtle border border-subtle text-accent-from truncate max-w-[145px]" title={paper.doi}>
+                DOI:{paper.doi}
+              </span>
+            )}
+            {paper.arxivId && (
+              <span className="px-2 py-0.5 rounded-md bg-card-subtle border border-subtle text-status-amber">
+                arXiv:{paper.arxivId}
+              </span>
+            )}
+            {paper.openAccess && (
+              <span className="px-2 py-0.5 rounded-md status-badge-emerald border inline-flex items-center gap-1">
+                <Unlock className="w-3 h-3" />
+                OA
+              </span>
+            )}
+          </div>
+
+          <span className="px-2 py-0.5 rounded-md status-badge-cyan border font-bold tabular-nums">
+            {score}% Relevance
+          </span>
+        </div>
+
+        {/* Cross-Entity Relationship Note */}
+        {paper.paperRelationships?.summary && (
+          <div className="mt-2 px-2.5 py-1.5 rounded-lg border text-[11px] status-badge-cyan flex items-center gap-1.5">
+            <Link2 className="w-3.5 h-3.5 shrink-0" />
+            <span>{paper.paperRelationships.summary}</span>
+          </div>
+        )}
+
+        {/* Expandable Anti-Hallucination Evidence Spans */}
+        <div className="mt-3 pt-2.5 border-t border-subtle">
+          <button
+            type="button"
+            onClick={() => setSpansExpanded((p) => !p)}
+            className="w-full flex items-center justify-between text-[11px] text-secondary hover:text-primary transition-lab"
+          >
+            <span className="flex items-center gap-1.5 font-mono font-semibold text-status-emerald">
+              <Quote className="w-3 h-3" />
+              Anti-Hallucination Evidence Spans ({evidenceQuotes.length || 1})
+            </span>
+            {spansExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+
+          {spansExpanded && (
+            <div className="mt-2 p-2.5 rounded-xl bg-page border border-emerald-500/20 space-y-2 text-[11px]">
+              {evidenceQuotes.length > 0 ? (
+                evidenceQuotes.map((q, idx) => (
+                  <blockquote key={idx} className="pl-2.5 border-l-2 border-emerald-500/60 text-secondary leading-relaxed">
+                    &ldquo;{q}&rdquo;
+                  </blockquote>
+                ))
+              ) : (
+                <blockquote className="pl-2.5 border-l-2 border-emerald-500/60 text-secondary leading-relaxed">
+                  &ldquo;{abstract.slice(0, 220)}&rdquo;
+                </blockquote>
+              )}
+
+              {/* Confidence Breakdown Bar */}
+              <div className="pt-1.5 border-t border-subtle flex items-center justify-between gap-2 font-mono text-[10px]">
+                <span className="text-faint">Metadata Proof Confidence</span>
+                <div className="flex items-center gap-2 flex-1 max-w-[140px]">
+                  <div className="flex-1 h-1.5 rounded-full bg-card-subtle overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-400 rounded-full"
+                      style={{ width: `${paper.confidenceScore ?? score}%` }}
+                    />
+                  </div>
+                  <span className="text-status-emerald font-bold tabular-nums">
+                    {paper.confidenceScore ?? score}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <MatchBreakdown
+          breakdown={paper.matchBreakdown}
+          evidence={[]}
+          warnings={paper.warnings || []}
+          matchReason={paper.matchReason || paper.relationshipEvidence || undefined}
+          overallScore={score}
+        />
+      </div>
+
+      {/* Footer Actions */}
+      <div className="mt-3.5 pt-3 border-t border-subtle flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setFeedbackModalOpen(true)}
+            className="text-[11px] text-muted hover:text-primary px-2 py-1 rounded-lg hover:bg-card-subtle transition-lab flex items-center gap-1"
+          >
+            <ThumbsUp className="w-3 h-3" />
+            <span>Feedback</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenDetails?.(paper)}
+            className="text-[11px] font-semibold text-secondary hover:text-primary px-2 py-1 rounded-lg hover:bg-card-subtle transition-lab flex items-center gap-1"
+          >
+            <BookOpen className="w-3 h-3 text-accent-from" />
+            <span>Inspect Paper</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {paper.pdfUrl && (
+            <a
+              href={paper.pdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded-lg status-badge-rose border font-mono font-bold text-[11px] transition-lab flex items-center gap-1"
+            >
+              <FileText className="w-3 h-3" />
+              PDF
+            </a>
+          )}
+          {paper.paperUrl && (
+            <a
+              href={paper.paperUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1 rounded-lg bg-card-subtle hover:bg-card-hover border border-subtle text-primary font-semibold text-[11px] transition-lab flex items-center gap-1"
+            >
+              <span>Source</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+        </div>
+      </div>
+
+      <UserFeedbackModal
+        isOpen={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        candidateId={paperId}
+        candidateTitle={title}
+        candidateType="paper"
+        searchQuery={query}
+      />
+    </div>
+  );
 }

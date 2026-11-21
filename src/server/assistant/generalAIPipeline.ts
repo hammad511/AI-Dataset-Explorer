@@ -84,7 +84,11 @@ export async function runGeneralAIPipeline(
             return content;
         }
     } catch (e: any) {
-        console.warn('[GENERAL_AI] LLM call failed, providing structured response:', e.message || e);
+        console.warn(
+            `[GENERAL_AI] Gemini LLM call failed (status=${e?.status ?? 'N/A'}, model=${e?.model ?? 'N/A'}), falling back to deterministic response:`,
+            e?.message || e,
+            e?.responseBody ? `| Response Body: ${String(e.responseBody).slice(0, 300)}` : ''
+        );
     }
 
     return getDeterministicFallbackAnswer(lastUserMessage);

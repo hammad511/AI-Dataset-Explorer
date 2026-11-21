@@ -1,10 +1,20 @@
+import asyncio
 import logging
+import os
 from typing import List, Dict, Any, Optional
 import httpx
 from backend.app.providers.data_sources.base import DataSourceAdapter
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_s2_headers() -> Dict[str, str]:
+    api_key = (settings.SEMANTIC_SCHOLAR_API_KEY or os.getenv("SEMANTIC_SCHOLAR_API_KEY") or "").strip()
+    headers = {"Accept": "application/json", "User-Agent": "AI-Dataset-Explorer/2.0 (FastAPI)"}
+    if api_key:
+        headers["x-api-key"] = api_key
+    return headers
 
 
 class SemanticScholarPaperAdapter(DataSourceAdapter):
@@ -17,9 +27,7 @@ class SemanticScholarPaperAdapter(DataSourceAdapter):
         return "semantic_scholar"
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        headers = {}
-        if settings.SEMANTIC_SCHOLAR_API_KEY:
-            headers["x-api-key"] = settings.SEMANTIC_SCHOLAR_API_KEY
+        headers = get_s2_headers()
 
         url = "https://api.semanticscholar.org/graph/v1/paper/search"
         params = {
@@ -28,23 +36,31 @@ class SemanticScholarPaperAdapter(DataSourceAdapter):
             "fields": "paperId,title,abstract,authors,year,venue,citationCount,url,openAccessPdf,publicationDate",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params=params, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    items = data.get("data", [])
-                    return [await self.normalize(item) for item in items]
-        except Exception as e:
-            logger.warning(f"Semantic Scholar search failed: {e}")
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.get(url, params=params, headers=headers)
+                    if resp.status_code in (429, 503) and attempt < 2:
+                        delay = 0.6 * (2 ** attempt)
+                        logger.warning(f"Semantic Scholar HTTP {resp.status_code}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        items = data.get("data", [])
+                        return [await self.normalize(item) for item in items]
+                    break
+            except Exception as e:
+                if attempt < 2:
+                    await asyncio.sleep(0.6 * (2 ** attempt))
+                    continue
+                logger.warning(f"Semantic Scholar search failed: {e}")
 
         return []
 
     async def fetch(self, resource_id: str) -> Optional[Dict[str, Any]]:
         url = f"https://api.semanticscholar.org/graph/v1/paper/{resource_id}"
-        headers = {}
-        if settings.SEMANTIC_SCHOLAR_API_KEY:
-            headers["x-api-key"] = settings.SEMANTIC_SCHOLAR_API_KEY
+        headers = get_s2_headers()
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 resp = await client.get(url, headers=headers)

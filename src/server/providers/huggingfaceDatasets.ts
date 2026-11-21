@@ -16,7 +16,12 @@ import {
     datasetCardCache, datasetMetaCache,
     datasetCardKey, datasetMetaKey, searchResultCache, searchKey
 } from '../cache/metadataCache';
-import { getHuggingFaceHeaders } from '@/server/providers/huggingface';
+import {
+    getHuggingFaceHeaders,
+    fetchHuggingFaceWithRetry,
+    HF_EXPAND_QUERY_PARAMS,
+    extractHuggingFaceLicense,
+} from '@/server/providers/huggingface';
 
 const HF_API = 'https://huggingface.co/api';
 const HF_DATASETS_ENDPOINT = `${HF_API}/datasets`;
@@ -28,18 +33,13 @@ interface FetchDiagnostics {
 }
 
 async function hfFetch(url: string, headers: Record<string, string>, timeoutMs: number, diagnostics?: FetchDiagnostics): Promise<Response | null> {
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-        const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-        clearTimeout(tid);
-        return res;
-    } catch (e: any) {
-        clearTimeout(tid);
-        if (diagnostics) diagnostics.networkFailures += 1;
-        console.error('[Hugging Face API] Fetch network error:', url.slice(0, 100), e?.message || e);
-        return null;
-    }
+    return fetchHuggingFaceWithRetry(url, headers, {
+        timeoutMs,
+        maxRetries: 2,
+        onNetworkFailure: () => {
+            if (diagnostics) diagnostics.networkFailures += 1;
+        },
+    });
 }
 
 // ── Dataset card (README) fetching ────────────────────────────────────────────
@@ -277,7 +277,7 @@ export async function searchHuggingFaceDatasets(
             continue;
         }
 
-        const url = `${HF_DATASETS_ENDPOINT}?search=${encodeURIComponent(q)}&sort=likes&direction=-1&limit=15`;
+        const url = `${HF_DATASETS_ENDPOINT}?search=${encodeURIComponent(q)}&sort=likes&direction=-1&limit=15&${HF_EXPAND_QUERY_PARAMS}`;
         console.log(`[Hugging Face API] Querying datasets: "${q}"`);
         const res = await hfFetch(url, headers, TIMEOUT, diagnostics);
         if (!res) continue;
@@ -350,13 +350,14 @@ async function enrichDataset(
 ): Promise<Partial<NormalizedDataset>> {
     const id: string = d.id ?? '';
 
-    // Fetch full metadata and dataset card concurrently
+    // If expanded metadata (cardData/tags/siblings) is already present from ?expand[], avoid redundant /api/datasets/:id call
+    const hasExpandedMeta = !!(d?.cardData || Array.isArray(d?.siblings));
     const [fullMeta, cardText] = await Promise.all([
-        fetchDatasetInfo(id, headers, timeoutMs),
+        hasExpandedMeta ? Promise.resolve(d as Record<string, unknown>) : fetchDatasetInfo(id, headers, timeoutMs),
         fetchDatasetCard(id, headers, timeoutMs),
     ]);
 
-    const cardData: any = (fullMeta as any)?.cardData ?? {};
+    const cardData: any = (fullMeta as any)?.cardData ?? d?.cardData ?? {};
     const tags: string[] = [
         ...((fullMeta as any)?.tags ?? []),
         ...(d.tags ?? []),
@@ -377,10 +378,7 @@ async function enrichDataset(
     const relatedModels = extractRelatedModels(cardData, cardText, id);
 
     // License
-    const license = cardData?.license
-        ?? tags.find(t => t.startsWith('license:'))?.replace('license:', '')
-        ?? (fullMeta as any)?.license
-        ?? 'unknown';
+    const license = extractHuggingFaceLicense({ ...d, ...fullMeta, cardData, tags });
 
     // Size
     const sizeBytes: number | null =

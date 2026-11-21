@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from 'bcryptjs';
-import { findUserByEmail, findUserById, findOrCreateOAuthUser } from '@/server/auth/userStore';
+import { findUserByEmail, findUserById, findOrCreateOAuthUser, getAuthSecret } from '@/server/auth/userStore';
 import { isAccountLocked, recordFailedAttempt, resetFailedAttempts } from '@/server/auth/accountLockout';
 import { logSecurityEvent } from '@/server/security/securityLogger';
 import { sanitizeEmail } from '@/server/security/sanitize';
@@ -55,6 +55,18 @@ const handler = NextAuth({
                     return null;
                 }
 
+                // Handle accounts created via Google OAuth that do not have a password set yet
+                if (!user.passwordHash) {
+                    logSecurityEvent({
+                        eventType: 'AUTH_LOGIN_FAILED',
+                        severity: 'INFO',
+                        email,
+                        userId: user.id,
+                        details: { reason: 'OAuth account attempted password login without passwordHash' },
+                    });
+                    throw new Error('This account uses Google Sign-In. Please continue with Google or use Forgot Password to set a password.');
+                }
+
                 const passwordValid = await bcrypt.compare(credentials.password, user.passwordHash);
                 if (!passwordValid) {
                     const failStatus = recordFailedAttempt(email);
@@ -101,12 +113,16 @@ const handler = NextAuth({
                   GoogleProvider({
                       clientId: process.env.GOOGLE_CLIENT_ID.trim(),
                       clientSecret: process.env.GOOGLE_CLIENT_SECRET.trim(),
+                      httpOptions: {
+                          timeout: 15000,
+                      },
                   }),
               ]
             : []),
     ],
     pages: {
         signIn: "/login",
+        error: "/login",
     },
     session: {
         strategy: "jwt",
@@ -263,7 +279,7 @@ const handler = NextAuth({
             return `${baseUrl}/explore`;
         },
     },
-    secret: process.env.NEXTAUTH_SECRET || 'AI_Dataset_Explorer_Secret_12345',
+    secret: getAuthSecret(),
 });
 
 export { handler as GET, handler as POST };

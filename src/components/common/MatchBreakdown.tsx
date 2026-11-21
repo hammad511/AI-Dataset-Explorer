@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { ChevronDown, ChevronUp, Zap, CheckCircle2, FileText, AlertTriangle, XCircle } from "lucide-react";
 
 export interface MatchBreakdownProps {
   breakdown?: any;
@@ -37,7 +38,7 @@ export function MatchBreakdown({
     popularity: 0,
     overall: overallScore,
     confirmedClaims: [],
-    warnings: warnings,
+    warnings,
   };
 
   const dimensions = [
@@ -45,90 +46,86 @@ export function MatchBreakdown({
     { label: "Task Alignment", score: b.task ?? 0, weight: "18%" },
     { label: "Modality Alignment", score: b.modality ?? 0, weight: "15%" },
     { label: "Target / Labels", score: b.target ?? 0, weight: "10%" },
-    { label: "Dimensionality (3D/2D)", score: b.dimension ?? 0, weight: "8%" },
+    { label: "Dimensionality", score: b.dimension ?? 0, weight: "8%" },
     { label: "Semantic Similarity", score: b.semantic ?? 0, weight: "8%" },
     { label: "Primary Evidence", score: b.evidence ?? 0, weight: "6%" },
     { label: "Metadata Quality", score: b.metadata ?? 0, weight: "4%" },
   ];
 
   const getScoreBarColor = (s: number) => {
-    if (s >= 85) return "bg-emerald-500";
-    if (s >= 65) return "bg-cyan-500";
-    if (s >= 40) return "bg-amber-500";
+    if (s >= 85) return "bg-emerald-400";
+    if (s >= 65) return "bg-sky-400";
+    if (s >= 40) return "bg-amber-400";
     return "bg-rose-500";
   };
 
   return (
-    <div className="mt-3 border-t border-subtle/50 pt-2.5 text-xs">
-      {/* Toggle Header */}
+    <div className="mt-3 border-t border-subtle pt-2.5 text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between py-1 text-secondary hover:text-primary transition-colors font-medium text-left"
+        className="w-full flex items-center justify-between py-1 text-muted hover:text-primary transition-lab font-medium text-left"
       >
-        <div className="flex items-center gap-1.5">
-          <span className="text-accent text-[11px]">⚡</span>
-          <span className="font-semibold text-primary">Why this result?</span>
-          <span className="text-[10px] text-muted">
-            ({b.overall ?? overallScore}/100 Match Breakdown)
+        <span className="flex items-center gap-1.5">
+          <Zap className="w-3.5 h-3.5 text-accent-from" />
+          <span className="font-semibold text-secondary">Verification &amp; Score Matrix</span>
+          <span className="font-mono text-[10px] text-faint tabular-nums">
+            ({b.overall ?? overallScore}/100)
           </span>
-        </div>
-        <span className="text-[11px] text-muted">{isExpanded ? "▲ Hide" : "▼ Explain"}</span>
+        </span>
+        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
 
-      {/* Rejection Alert if Disqualified */}
       {rejectionReason && (
-        <div className="mt-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-start gap-1.5">
-          <span className="text-rose-400 font-bold">✗</span>
+        <div className="mt-2 p-2.5 rounded-xl status-badge-rose border text-[11px] flex items-start gap-2">
+          <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <div>
-            <strong className="font-semibold">Disqualified / Not Recommended:</strong> {rejectionReason}
+            <strong className="font-semibold">Constraint Veto:</strong> {rejectionReason}
           </div>
         </div>
       )}
 
-      {/* Expanded Detailed Breakdown */}
       {isExpanded && (
-        <div className="mt-2.5 space-y-3 bg-card-subtle rounded-xl p-3 border border-subtle">
-          {/* Reason Summary */}
+        <div className="mt-2.5 space-y-3 bg-page rounded-xl p-3 border border-subtle">
           {matchReason && (
-            <div className="text-[11px] text-secondary border-b border-subtle pb-2">
-              <span className="font-semibold text-primary">Synthesis:</span> {matchReason}
+            <div className="text-[11px] text-secondary border-b border-subtle pb-2 leading-relaxed">
+              <span className="font-mono text-[10px] uppercase text-faint mr-1.5">Synthesis:</span>
+              {matchReason}
             </div>
           )}
 
-          {/* Dimension Breakdown Bars */}
           <div className="space-y-1.5">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-muted mb-1">
-              Weighted Multi-Factor Scoring
+            <div className="text-[10px] font-mono uppercase tracking-wider text-faint mb-1">
+              Multi-Factor Weights
             </div>
             {dimensions.map((dim, i) => (
               <div key={i} className="flex items-center justify-between gap-2">
                 <span className="text-muted w-36 truncate text-[11px]">
-                  {dim.label} <span className="text-[9px] opacity-60">({dim.weight})</span>
+                  {dim.label} <span className="text-[9px] font-mono text-faint">({dim.weight})</span>
                 </span>
                 <div className="flex-1 h-1.5 bg-card rounded-full overflow-hidden border border-subtle max-w-[140px]">
                   <div
                     className={`h-full rounded-full transition-all ${getScoreBarColor(dim.score)}`}
-                    style={{ width: `${dim.score}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, dim.score))}%` }}
                   />
                 </div>
-                <span className="text-[11px] font-bold text-primary w-8 text-right">
+                <span className="text-[11px] font-mono font-semibold text-primary w-9 text-right tabular-nums">
                   {dim.score}%
                 </span>
               </div>
             ))}
           </div>
 
-          {/* Confirmed Claims */}
           {b.confirmedClaims && b.confirmedClaims.length > 0 && (
-            <div className="border-t border-subtle pt-2">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 mb-1 flex items-center gap-1">
-                <span>✓</span> Confirmed Against Evidence
+            <div className="border-t border-subtle pt-2 space-y-1">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-status-emerald flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                Confirmed Claims
               </div>
               <ul className="space-y-0.5">
                 {b.confirmedClaims.map((claim: string, idx: number) => (
-                  <li key={idx} className="text-[11px] text-secondary flex items-start gap-1">
-                    <span className="text-emerald-400">✓</span>
+                  <li key={idx} className="text-[11px] text-secondary flex items-start gap-1.5">
+                    <span className="text-status-emerald">•</span>
                     <span>{claim}</span>
                   </li>
                 ))}
@@ -136,33 +133,31 @@ export function MatchBreakdown({
             </div>
           )}
 
-          {/* Verified Evidence Details */}
           {evidence.length > 0 && (
-            <div className="border-t border-subtle pt-2">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-cyan-400 mb-1 flex items-center gap-1">
-                <span>📄</span> Primary Evidence Sources
+            <div className="border-t border-subtle pt-2 space-y-1.5">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-accent-from flex items-center gap-1">
+                <FileText className="w-3 h-3" />
+                Evidence Spans
               </div>
-              <div className="space-y-1">
-                {evidence.slice(0, 3).map((item, idx) => (
-                  <div key={idx} className="text-[10px] bg-card p-1.5 rounded border border-subtle text-secondary">
-                    <div className="font-semibold text-primary">{item.claim}</div>
-                    <div className="text-muted truncate">{item.evidenceText}</div>
-                  </div>
-                ))}
-              </div>
+              {evidence.slice(0, 3).map((item, idx) => (
+                <div key={idx} className="text-[11px] bg-card p-2 rounded-lg border border-subtle text-secondary">
+                  <div className="font-semibold text-primary">{item.claim}</div>
+                  <div className="font-mono text-[10px] text-muted truncate mt-0.5">{item.evidenceText}</div>
+                </div>
+              ))}
             </div>
           )}
 
-          {/* Potential Limitations / Warnings */}
           {warnings.length > 0 && (
-            <div className="border-t border-subtle pt-2">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400 mb-1 flex items-center gap-1">
-                <span>⚠️</span> Potential Limitations
+            <div className="border-t border-subtle pt-2 space-y-1">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-status-amber flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Constraints &amp; Risks
               </div>
               <ul className="space-y-0.5">
                 {warnings.map((warn, idx) => (
-                  <li key={idx} className="text-[11px] text-amber-300/90 flex items-start gap-1">
-                    <span className="text-amber-400">⚠</span>
+                  <li key={idx} className="text-[11px] text-amber-300/90 flex items-start gap-1.5">
+                    <span>•</span>
                     <span>{warn}</span>
                   </li>
                 ))}

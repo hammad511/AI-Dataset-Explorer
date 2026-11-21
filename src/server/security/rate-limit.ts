@@ -24,7 +24,7 @@ export function isRateLimited(
     maxRequests: number,
     windowMs: number,
 ): boolean {
-    if (process.env.NODE_ENV === 'test' || process.env.PLAYWRIGHT_TEST_BASE_URL || true) {
+    if (process.env.NODE_ENV === 'test' || Boolean(process.env.PLAYWRIGHT_TEST_BASE_URL)) {
         return false;
     }
     if (!stores.has(namespace)) {
@@ -55,6 +55,16 @@ export function isRateLimited(
     }
 
     return false;
+}
+
+/**
+ * Resets the rate-limit counter for a specific namespace and key (e.g. after a successful login).
+ */
+export function resetRateLimit(namespace: string, key: string): void {
+    const store = stores.get(namespace);
+    if (store) {
+        store.delete(key);
+    }
 }
 
 /**

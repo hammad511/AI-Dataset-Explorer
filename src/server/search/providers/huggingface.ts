@@ -7,19 +7,17 @@
 import { UnifiedCandidate, StructuredQueryUnderstanding } from '../types';
 import { extractExplicitModality } from '../modalityParser';
 import { classifyTask, canonicalTaskToHFPipelineTag } from '../taskAlignmentMatrix';
-
+import {
+    getHuggingFaceHeaders,
+    fetchHuggingFaceWithRetry,
+    HF_EXPAND_QUERY_PARAMS,
+    extractModelParameterSize,
+    extractHuggingFaceLicense,
+} from '@/server/providers/huggingface';
+import { getFallbackBaselineModels } from '../modelsFallback';
 
 const HF_DATASETS_API = 'https://huggingface.co/api/datasets';
 const HF_MODELS_API = 'https://huggingface.co/api/models';
-
-function getHfHeaders(): Record<string, string> {
-    const token = process.env.HUGGING_FACE_TOKEN || process.env.HUGGINGFACE_TOKEN || process.env.HF_API_KEY || process.env.HF_TOKEN;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-    return headers;
-}
 
 export async function fetchHuggingFaceDatasets(
     queries: string[],
@@ -28,18 +26,14 @@ export async function fetchHuggingFaceDatasets(
 ): Promise<UnifiedCandidate[]> {
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
-    const headers = getHfHeaders();
+    const headers = getHuggingFaceHeaders();
 
     for (const q of queries.slice(0, 4)) {
         try {
-            const url = `${HF_DATASETS_API}?search=${encodeURIComponent(q)}&full=true&limit=30`;
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
+            const url = `${HF_DATASETS_API}?search=${encodeURIComponent(q)}&limit=30&${HF_EXPAND_QUERY_PARAMS}`;
+            const res = await fetchHuggingFaceWithRetry(url, headers, { timeoutMs: 6000, maxRetries: 2 });
 
-            const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
-
-            if (!res.ok) continue;
+            if (!res || !res.ok) continue;
 
             const items = await res.json();
             if (!Array.isArray(items)) continue;
@@ -52,20 +46,23 @@ export async function fetchHuggingFaceDatasets(
                 const title = id.split('/').pop() || id;
                 const desc = item.description || item.cardData?.description || item.cardData?.summary || '';
                 const tags = Array.isArray(item.tags) ? item.tags : [];
+                const siblings = Array.isArray(item.siblings) ? item.siblings : [];
 
                 const formats: string[] = [];
-                const blob = `${id} ${title} ${desc} ${tags.join(' ')}`.toLowerCase();
+                const siblingNames = siblings.map((s: any) => String(s?.rfilename || '')).join(' ');
+                const blob = `${id} ${title} ${desc} ${tags.join(' ')} ${siblingNames}`.toLowerCase();
                 if (/nii|\.nii\.gz|nifti/i.test(blob)) formats.push('nii.gz');
                 if (/mha/i.test(blob)) formats.push('mha');
                 if (/dicom/i.test(blob)) formats.push('dicom');
-                if (/parquet/i.test(blob)) formats.push('parquet');
-                if (/arrow/i.test(blob)) formats.push('arrow');
+                if (/parquet|\.parquet/i.test(blob)) formats.push('parquet');
+                if (/arrow|\.arrow/i.test(blob)) formats.push('arrow');
                 const explicitModality = extractExplicitModality(
                     item.cardData?.pretty_name || title,
                     desc,
                     tags,
                     formats
                 );
+                const license = extractHuggingFaceLicense(item);
 
                 candidates.push({
                     id,
@@ -77,7 +74,7 @@ export async function fetchHuggingFaceDatasets(
                     tags,
                     modality: explicitModality,
                     url: `https://huggingface.co/datasets/${id}`,
-                    license: item.cardData?.license || item.license || 'Open Access',
+                    license,
                     formats,
                     downloads: item.downloads || null,
                     likes: item.likes || null,
@@ -86,6 +83,7 @@ export async function fetchHuggingFaceDatasets(
                         private: item.private,
                         gated: item.gated,
                         cardData: item.cardData,
+                        siblingsCount: siblings.length,
                     },
                     matchScore: 50,
                     
@@ -122,25 +120,29 @@ export async function fetchHuggingFaceModels(
 ): Promise<UnifiedCandidate[]> {
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
-    const headers = getHfHeaders();
+    const headers = getHuggingFaceHeaders();
 
     // Determine HF pipeline_tag from the query's extracted task for precision filtering.
-    // Uses the task alignment matrix to map canonical task â†’ HF API taxonomy.
     const queryTaskText = `${understanding.rawQuery} ${(understanding.tasks && understanding.tasks[0]) || ''}`;
     const canonicalTask = classifyTask(queryTaskText);
     const hfPipelineTag = canonicalTask !== 'DISCOVERY' ? canonicalTaskToHFPipelineTag(canonicalTask) : null;
+    void hfPipelineTag;
+
+    let hitRateLimitOrOutage = false;
 
     for (const q of queries.slice(0, 4)) {
         try {
-            // HF pipeline_tag is often inaccurate for medical models (e.g. tagging detection as classification)
-            const url = `${HF_MODELS_API}?search=${encodeURIComponent(q)}&full=true&limit=30`;
+            const url = `${HF_MODELS_API}?search=${encodeURIComponent(q)}&limit=30&${HF_EXPAND_QUERY_PARAMS}`;
+            const res = await fetchHuggingFaceWithRetry(url, headers, { timeoutMs: 6000, maxRetries: 2 });
 
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
-
-            const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
-
+            if (!res) {
+                hitRateLimitOrOutage = true;
+                continue;
+            }
+            if (res.status === 429 || res.status === 503) {
+                hitRateLimitOrOutage = true;
+                continue;
+            }
             if (!res.ok) continue;
 
             const items = await res.json();
@@ -174,6 +176,8 @@ export async function fetchHuggingFaceModels(
                     tags,
                     []
                 );
+                const license = extractHuggingFaceLicense(item);
+                const { parameters, safetensorsBytes } = extractModelParameterSize(item);
 
                 candidates.push({
                     id,
@@ -187,13 +191,16 @@ export async function fetchHuggingFaceModels(
                     url: `https://huggingface.co/${id}`,
                     pipelineTag,
                     architecture,
-                    license: item.cardData?.license || item.license || 'Open Access',
+                    license,
                     downloads: item.downloads || null,
                     likes: item.likes || null,
                     metadata: {
                         pipeline_tag: pipelineTag,
                         library_name: item.library_name,
                         framework: item.library_name || 'PyTorch',
+                        parameters,
+                        safetensorsBytes,
+                        siblingsCount: Array.isArray(item.siblings) ? item.siblings.length : 0,
                     },
                     matchScore: 50,
                     
@@ -218,6 +225,12 @@ export async function fetchHuggingFaceModels(
         } catch {
             // Continue on timeout
         }
+    }
+
+    // Graceful fallback to modelsFallback.ts when rate-limited (429) or unavailable (503) and no models retrieved
+    if (candidates.length === 0 && hitRateLimitOrOutage) {
+        console.warn('[Hugging Face API] Rate limit/outage encountered with 0 models retrieved; falling back to getFallbackBaselineModels.');
+        return getFallbackBaselineModels(understanding);
     }
 
     return candidates;

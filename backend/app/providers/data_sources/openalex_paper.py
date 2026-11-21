@@ -1,10 +1,22 @@
 import logging
+import os
 from typing import List, Dict, Any, Optional
 import httpx
 from backend.app.providers.data_sources.base import DataSourceAdapter
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def get_openalex_params(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = dict(extra or {})
+    api_key = (settings.OPENALEX_API_KEY or os.getenv("OPENALEX_API_KEY") or "").strip()
+    email = (settings.OPENALEX_EMAIL or os.getenv("OPENALEX_EMAIL") or "research@example.com").strip()
+    if api_key:
+        params["api_key"] = api_key
+    if email:
+        params["mailto"] = email
+    return params
 
 
 class OpenAlexPaperAdapter(DataSourceAdapter):
@@ -18,11 +30,10 @@ class OpenAlexPaperAdapter(DataSourceAdapter):
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
         url = "https://api.openalex.org/works"
-        params = {
+        params = get_openalex_params({
             "search": query,
             "per_page": limit,
-            "mailto": settings.OPENALEX_EMAIL,
-        }
+        })
 
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
@@ -41,7 +52,7 @@ class OpenAlexPaperAdapter(DataSourceAdapter):
         url = f"https://api.openalex.org/works/{clean_id}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params={"mailto": settings.OPENALEX_EMAIL})
+                resp = await client.get(url, params=get_openalex_params())
                 if resp.status_code == 200:
                     return await self.normalize(resp.json())
         except Exception as e:

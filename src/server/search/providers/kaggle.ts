@@ -5,16 +5,24 @@
  */
 
 import { UnifiedCandidate, StructuredQueryUnderstanding } from '../types';
-import { getKaggleAuthHeaders } from '@/server/providers/kaggle';
+import {
+    getKaggleAuthHeaders,
+    isKaggleConfigured,
+    fetchKaggleWithRetry,
+    normalizeKaggleDatasetItem,
+    KAGGLE_DATASETS_LIST_ENDPOINT,
+} from '@/server/providers/kaggle';
 import { extractExplicitModality } from '../modalityParser';
-
-const KAGGLE_API = 'https://www.kaggle.com/api/v1/datasets/list';
 
 export async function fetchKaggleCandidates(
     queries: string[],
     understanding: StructuredQueryUnderstanding,
     poolLimit = 80
 ): Promise<UnifiedCandidate[]> {
+    if (!isKaggleConfigured()) {
+        return [];
+    }
+
     const headers = getKaggleAuthHeaders();
     if (!headers['Authorization']) {
         return [];
@@ -23,34 +31,26 @@ export async function fetchKaggleCandidates(
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
 
-    const relaxedQueries: string[] = [];
-
-    const effectiveQueries = Array.from(new Set([...relaxedQueries, ...queries]));
+    const effectiveQueries = Array.from(
+        new Set(queries.map((q) => (q || '').trim()).filter((q) => q.length >= 2))
+    );
 
     for (const q of effectiveQueries.slice(0, 5)) {
         try {
-            const url = `${KAGGLE_API}?search=${encodeURIComponent(q)}&pageSize=30`;
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
+            const url = `${KAGGLE_DATASETS_LIST_ENDPOINT}?search=${encodeURIComponent(q)}&pageSize=30`;
+            const res = await fetchKaggleWithRetry(url, headers, { timeoutMs: 6000, maxRetries: 2 });
 
-            const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
-
-            if (!res.ok) continue;
+            if (!res || !res.ok) continue;
 
             const items = await res.json();
             if (!Array.isArray(items)) continue;
 
-            for (const item of items) {
-                const id = item.ref || `${item.ownerRef}/${item.datasetSlug}` || item.id || '';
-                if (!id || seenIds.has(id)) continue;
-                seenIds.add(id);
+            for (const rawItem of items) {
+                const norm = normalizeKaggleDatasetItem(rawItem);
+                if (!norm || seenIds.has(norm.id)) continue;
+                seenIds.add(norm.id);
 
-                const title = item.title || item.datasetTitle || id.split('/').pop() || 'Untitled Kaggle Dataset';
-                const desc = item.description || item.subtitle || '';
-                const tags = Array.isArray(item.tags)
-                    ? item.tags.map((t: any) => (typeof t === 'string' ? t : t.name || t.description || ''))
-                    : [];
+                const { id, title, description: desc, tags, url: itemUrl, licenseName, totalBytes, downloadCount, voteCount, usabilityRating, ownerRef, lastUpdated, isFeatured } = norm;
 
                 // Infer format signals from title and tags
                 const formats: string[] = [];
@@ -73,16 +73,17 @@ export async function fetchKaggleCandidates(
                     description: desc,
                     tags,
                     modality: explicitModality,
-                    url: item.url || `https://www.kaggle.com/datasets/${id}`,
-                    license: item.licenseName || 'Other / See Page',
+                    url: itemUrl,
+                    license: licenseName || 'Other / See Page',
                     formats,
-                    sizeBytes: item.totalBytes || null,
-                    downloads: item.downloadCount || null,
-                    likes: item.voteCount || null,
+                    sizeBytes: totalBytes,
+                    downloads: downloadCount,
+                    likes: voteCount,
                     metadata: {
-                        owner: item.ownerRef || item.ownerName,
-                        lastUpdated: item.lastUpdated,
-                        isFeatured: item.isFeatured,
+                        owner: ownerRef,
+                        lastUpdated,
+                        isFeatured,
+                        usabilityRating,
                     },
                     matchScore: 50,
                     

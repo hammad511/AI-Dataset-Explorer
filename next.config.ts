@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
     poweredByHeader: false, // Remove X-Powered-By: Next.js
+    experimental: {
+        turbopackFileSystemCacheForDev: false,
+    },
     async headers() {
         return [
             {
@@ -30,10 +33,10 @@ const nextConfig: NextConfig = {
                             "font-src 'self' data:",
                             "connect-src 'self' https://huggingface.co https://www.kaggle.com https://accounts.google.com https://generativelanguage.googleapis.com",
                             "frame-src https://accounts.google.com",
-                            "form-action 'self'",
+                            "form-action 'self' https://accounts.google.com",
                             "base-uri 'self'",
                             "object-src 'none'",
-                            "upgrade-insecure-requests",
+                            ...(process.env.NODE_ENV === 'production' ? ["upgrade-insecure-requests"] : []),
                         ].join('; '),
                     },
                 ],

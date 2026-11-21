@@ -101,10 +101,32 @@ export function getHardenedSystemInstruction(baseSystemInstruction: string): str
  */
 export function guardrailOutput(llmOutput: string): string {
     if (!llmOutput) return '';
-    // Check for accidental key leaks
-    const redacted = llmOutput
+    // Check for accidental key leaks by pattern
+    let redacted = llmOutput
         .replace(/sk-[a-zA-Z0-9_-]{20,}/g, '[REDACTED_API_KEY]')
         .replace(/whsec_[a-zA-Z0-9_-]{20,}/g, '[REDACTED_SECRET]')
-        .replace(/AIza[a-zA-Z0-9_-]{30,}/g, '[REDACTED_KEY]');
+        .replace(/AIza[a-zA-Z0-9_-]{30,}/g, '[REDACTED_KEY]')
+        .replace(/AQ\.[a-zA-Z0-9_-]{30,}/g, '[REDACTED_KEY]')
+        .replace(/hf_[a-zA-Z0-9]{20,}/g, '[REDACTED_HF_TOKEN]')
+        .replace(/KGAT_[a-zA-Z0-9_-]{20,}/g, '[REDACTED_KAGGLE_TOKEN]');
+
+    // Dynamically redact configured environment API keys (Literature & Provider keys) if accidentally echoed
+    const envSecrets: Array<{ value?: string; label: string }> = [
+        { value: process.env.NCBI_API_KEY, label: '[REDACTED_NCBI_KEY]' },
+        { value: process.env.SEMANTIC_SCHOLAR_API_KEY, label: '[REDACTED_S2_KEY]' },
+        { value: process.env.OPENALEX_API_KEY, label: '[REDACTED_OPENALEX_KEY]' },
+        { value: process.env.GEMINI_API_KEY, label: '[REDACTED_KEY]' },
+        { value: process.env.HF_TOKEN, label: '[REDACTED_HF_TOKEN]' },
+        { value: process.env.KAGGLE_API_TOKEN, label: '[REDACTED_KAGGLE_TOKEN]' },
+        { value: process.env.KAGGLE_KEY, label: '[REDACTED_KAGGLE_TOKEN]' },
+    ];
+
+    for (const secret of envSecrets) {
+        const trimmed = (secret.value || '').trim();
+        if (trimmed && trimmed.length >= 8 && redacted.includes(trimmed)) {
+            redacted = redacted.split(trimmed).join(secret.label);
+        }
+    }
+
     return redacted;
 }

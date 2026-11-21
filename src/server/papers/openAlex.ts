@@ -79,6 +79,28 @@ export function reconstructOpenAlexAbstract(invertedIndex?: Record<string, numbe
 
 const TIMEOUT_MS = 7500;
 
+export function getOpenAlexApiKey(): string {
+    return (process.env.OPENALEX_API_KEY || '').trim();
+}
+
+export function getOpenAlexEmail(): string {
+    return (
+        process.env.CONTACT_EMAIL ||
+        process.env.OPENALEX_EMAIL ||
+        process.env.CROSSREF_EMAIL ||
+        'research@example.com'
+    ).trim();
+}
+
+export function buildOpenAlexAuthQueryParams(): string {
+    const apiKey = getOpenAlexApiKey();
+    const mailto = getOpenAlexEmail();
+    if (apiKey) {
+        return `api_key=${encodeURIComponent(apiKey)}&mailto=${encodeURIComponent(mailto)}`;
+    }
+    return `mailto=${encodeURIComponent(mailto)}`;
+}
+
 export async function searchOpenAlex(
     query: string,
     limit: number = 8,
@@ -94,13 +116,9 @@ export async function searchOpenAlex(
         return cached;
     }
 
-    const mailto = process.env.CROSSREF_EMAIL || process.env.OPENALEX_EMAIL || 'support@datasetexplorer.local';
-    const apiKey = process.env.OPENALEX_API_KEY;
-
-    let endpoint = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&per-page=${limit}&mailto=${encodeURIComponent(mailto)}`;
-    if (apiKey) {
-        endpoint += `&api_key=${encodeURIComponent(apiKey)}`;
-    }
+    const mailto = getOpenAlexEmail();
+    const authParams = buildOpenAlexAuthQueryParams();
+    const endpoint = `https://api.openalex.org/works?search=${encodeURIComponent(cleanQuery)}&per-page=${limit}&${authParams}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);

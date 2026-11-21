@@ -129,8 +129,8 @@ export async function middleware(req: NextRequest) {
     }
 
     // 4. Rate Limiting for Credentials Sign-in Endpoint
-    if (pathname === '/api/auth/callback/credentials') {
-        if (isRateLimited('login', clientIp, 10, 15 * 60 * 1000)) {
+    if (pathname === '/api/auth/callback/credentials' && req.method === 'POST') {
+        if (isRateLimited('login-callback', clientIp, 25, 15 * 60 * 1000)) {
             logSecurityEvent({
                 eventType: 'RATE_LIMIT_EXCEEDED',
                 severity: 'WARN',
@@ -180,8 +180,11 @@ export async function middleware(req: NextRequest) {
     }
 
     // 6. Require Authentication for Protected Routes
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    if (!token) {
+    const secret = process.env.NEXTAUTH_SECRET || 'AI_Dataset_Explorer_Secret_12345';
+    const token = await getToken({ req, secret });
+    const isAuthenticatedToken = Boolean(token && (token.id || token.email));
+
+    if (!isAuthenticatedToken || !token) {
         // If API route: return 401 Unauthorized instead of redirect
         if (pathname.startsWith('/api/')) {
             const apiRes = new NextResponse(
@@ -191,10 +194,19 @@ export async function middleware(req: NextRequest) {
             return applySecurityHeaders(apiRes);
         }
 
-        // If unauthenticated: strip foreign instance params from copied URLs
+        // If unauthenticated: preserve requested safe path while stripping foreign instance params
+        const cleanSearchParams = new URLSearchParams(req.nextUrl.searchParams);
+        cleanSearchParams.delete('inst');
+        const qs = cleanSearchParams.toString();
+        const requestedTarget = `${pathname}${qs ? `?${qs}` : ''}`;
+        const safeTarget =
+            requestedTarget.startsWith('/') && !requestedTarget.startsWith('//') && !requestedTarget.includes('\\')
+                ? requestedTarget
+                : '/explore';
+
         const loginUrl = new URL('/login', req.url);
-        loginUrl.searchParams.set('redirect_to', '/explore');
-        loginUrl.searchParams.set('callbackUrl', '/explore');
+        loginUrl.searchParams.set('redirect_to', safeTarget);
+        loginUrl.searchParams.set('callbackUrl', safeTarget);
 
         const redirectResponse = NextResponse.redirect(loginUrl);
         // Force browser and reverse proxies to never cache the unauthenticated redirect
@@ -219,8 +231,20 @@ export async function middleware(req: NextRequest) {
 
     // Attach user context headers to downstream request
     const requestHeaders = new Headers(req.headers);
-    if (token.id) requestHeaders.set('x-user-id', token.id as string);
-    if ((token as any).role) requestHeaders.set('x-user-role', (token as any).role as string);
+    if (token.id) requestHeaders.set('x-user-id', String(token.id));
+    if (token.email) requestHeaders.set('x-user-email', String(token.email));
+    if ((token as any).role) requestHeaders.set('x-user-role', String((token as any).role));
+
+    response = NextResponse.next({
+        request: {
+            headers: requestHeaders,
+        },
+    });
+    if (isAllowedOrigin && origin) {
+        response.headers.set('Access-Control-Allow-Origin', origin);
+        response.headers.set('Access-Control-Allow-Credentials', 'true');
+    }
+    response = applySecurityHeaders(response);
 
     // Ensure protected responses are private and not cached by shared proxies
     response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');

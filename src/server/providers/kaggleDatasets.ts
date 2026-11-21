@@ -9,9 +9,13 @@ import type { NormalizedDataset } from '@/types/pipeline';
 import type { QueryUnderstanding } from '@/server/query-understanding/queryParser';
 import type { ExpandedQueries } from '@/server/query-understanding/queryExpander';
 import { searchResultCache, searchKey } from '../cache/metadataCache';
-import { getKaggleAuthHeaders } from '@/server/providers/kaggle';
-
-const KAGGLE_API = 'https://www.kaggle.com/api/v1/datasets/list';
+import {
+    getKaggleAuthHeaders,
+    isKaggleConfigured,
+    fetchKaggleWithRetry,
+    normalizeKaggleDatasetItem,
+    KAGGLE_DATASETS_LIST_ENDPOINT,
+} from '@/server/providers/kaggle';
 
 interface FetchDiagnostics {
     networkFailures: number;
@@ -23,22 +27,13 @@ async function kaggleFetch(
     timeoutMs: number,
     diagnostics?: FetchDiagnostics
 ): Promise<Response | null> {
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-        const res = await fetch(url, {
-            headers,
-            signal: ctrl.signal,
-            cache: 'no-store',
-        });
-        clearTimeout(tid);
-        return res;
-    } catch (e: any) {
-        clearTimeout(tid);
-        if (diagnostics) diagnostics.networkFailures += 1;
-        console.error('[Kaggle API] Network fetch error:', e?.message || e);
-        return null;
-    }
+    return fetchKaggleWithRetry(url, headers, {
+        timeoutMs,
+        maxRetries: 2,
+        onNetworkFailure: () => {
+            if (diagnostics) diagnostics.networkFailures += 1;
+        },
+    });
 }
 
 // ── Modality inference from Kaggle tags/title ─────────────────────────────────
@@ -86,13 +81,11 @@ export async function searchKaggleDatasets(
     expanded: ExpandedQueries,
     trace?: Record<string, unknown>
 ): Promise<Partial<NormalizedDataset>[]> {
-    const KAGGLE_USERNAME = process.env.KAGGLE_USERNAME;
-    const KAGGLE_KEY = process.env.KAGGLE_KEY;
     const TIMEOUT = parseInt(process.env.EXTERNAL_API_TIMEOUT_MS || '15000', 10);
 
-    if (!KAGGLE_USERNAME && !KAGGLE_KEY) {
-        if (trace) { trace.called = false; trace.success = false; trace.reason = 'KAGGLE_USERNAME or KAGGLE_KEY not configured'; }
-        console.warn('[Kaggle API] Warning: KAGGLE_USERNAME or KAGGLE_KEY not configured.');
+    if (!isKaggleConfigured()) {
+        if (trace) { trace.called = false; trace.success = false; trace.reason = 'Kaggle credentials (KAGGLE_API_TOKEN or KAGGLE_USERNAME + KAGGLE_KEY) not configured'; }
+        console.warn('[Kaggle API] Warning: Kaggle credentials not configured.');
         return [];
     }
 
@@ -108,17 +101,18 @@ export async function searchKaggleDatasets(
     const diagnostics: FetchDiagnostics = { networkFailures: 0 };
 
     for (const q of queries) {
-        if (!q || q.trim().length < 3) continue;
+        const cleanQuery = (q || '').trim();
+        if (cleanQuery.length < 3) continue;
 
-        const cacheKey = searchKey('kaggle', q);
+        const cacheKey = searchKey('kaggle', cleanQuery);
         const cached = searchResultCache.get(cacheKey);
         if (cached !== null) {
             rawResults.push(...(cached as any[]));
             continue;
         }
 
-        const url = `${KAGGLE_API}?search=${encodeURIComponent(q)}&sortBy=relevance&pageSize=20`;
-        console.log(`[Kaggle API] Querying: "${q}"`);
+        const url = `${KAGGLE_DATASETS_LIST_ENDPOINT}?search=${encodeURIComponent(cleanQuery)}&sortBy=relevance&pageSize=20`;
+        console.log(`[Kaggle API] Querying: "${cleanQuery}"`);
         const res = await kaggleFetch(url, headers, TIMEOUT, diagnostics);
         if (!res) continue;
 
@@ -127,7 +121,7 @@ export async function searchKaggleDatasets(
 
         if (!res.ok) {
             const errText = await res.text();
-            console.error(`[Kaggle API] Error:`, errText.slice(0, 300));
+            console.error(`[Kaggle API] HTTP ${res.status} Error for query "${cleanQuery}":`, errText.slice(0, 300));
             continue;
         }
         try {
@@ -135,9 +129,9 @@ export async function searchKaggleDatasets(
             const items: any[] = Array.isArray(data) ? data : [];
             searchResultCache.set(cacheKey, items);
             rawResults.push(...items);
-            console.log(`[Kaggle API] Found ${items.length} datasets for query "${q}"`);
+            console.log(`[Kaggle API] Found ${items.length} datasets for query "${cleanQuery}"`);
         } catch (e: any) {
-            console.error(`[Kaggle API] Parse error for query "${q}":`, e?.message || e);
+            console.error(`[Kaggle API] Parse error for query "${cleanQuery}":`, e?.message || e);
         }
     }
 
@@ -169,65 +163,67 @@ export async function searchKaggleDatasets(
     console.log(`[Kaggle API] Results after deduplication & relevance filter: ${finalCandidates.length} (out of ${uniqueRaw.length} total)`);
 
     // Normalize results
-    const normalized: Partial<NormalizedDataset>[] = finalCandidates.map(item => {
-        const tags: string[] = (item.tags ?? []).map((t: any) => typeof t === 'string' ? t : t?.name ?? '').filter(Boolean);
-        const desc = item.subtitle || item.description || '';
-        const modality = inferKaggleModality(item.title ?? '', desc, tags);
-        const task = inferKaggleTask(item.title ?? '', desc, tags);
-        const sizeBytes: number | null = item.totalBytes ?? null;
-        const size = sizeBytes != null
-            ? sizeBytes > 1e9 ? `${(sizeBytes / 1e9).toFixed(1)} GB`
-            : sizeBytes > 1e6 ? `${(sizeBytes / 1e6).toFixed(0)} MB`
-            : sizeBytes > 1e3 ? `${(sizeBytes / 1e3).toFixed(0)} KB`
-            : `${sizeBytes} B`
-            : 'unknown';
+    const normalized: Partial<NormalizedDataset>[] = finalCandidates
+        .map(raw => {
+            const norm = normalizeKaggleDatasetItem(raw);
+            if (!norm) return null;
+            const { tags, description: desc, title, subtitle, ref, url, licenseName, totalBytes: sizeBytes, downloadCount, voteCount, usabilityRating, creatorName } = norm;
+            const modality = inferKaggleModality(title, desc, tags);
+            const task = inferKaggleTask(title, desc, tags);
+            const size = sizeBytes != null
+                ? sizeBytes > 1e9 ? `${(sizeBytes / 1e9).toFixed(1)} GB`
+                : sizeBytes > 1e6 ? `${(sizeBytes / 1e6).toFixed(0)} MB`
+                : sizeBytes > 1e3 ? `${(sizeBytes / 1e3).toFixed(0)} KB`
+                : `${sizeBytes} B`
+                : 'unknown';
 
-        const evidence = [
-            { value: item.title, state: 'CONFIRMED' as const, confidence: 1.0, source: 'Kaggle metadata', verified: true },
-            { value: item.licenseName || 'unknown', state: item.licenseName ? 'CONFIRMED' as const : 'UNKNOWN' as const, confidence: item.licenseName ? 0.9 : 0, source: 'Kaggle metadata', verified: !!item.licenseName },
-            { value: modality, state: modality !== 'unknown' ? 'INFERRED' as const : 'UNKNOWN' as const, confidence: modality !== 'unknown' ? 0.7 : 0, source: 'inferred from title/description/tags', verified: false },
-        ];
+            const evidence = [
+                { value: title, state: 'CONFIRMED' as const, confidence: 1.0, source: 'Kaggle metadata', verified: true },
+                { value: licenseName || 'unknown', state: licenseName ? 'CONFIRMED' as const : 'UNKNOWN' as const, confidence: licenseName ? 0.9 : 0, source: 'Kaggle metadata', verified: !!licenseName },
+                { value: modality, state: modality !== 'unknown' ? 'INFERRED' as const : 'UNKNOWN' as const, confidence: modality !== 'unknown' ? 0.7 : 0, source: 'inferred from title/description/tags', verified: false },
+            ];
 
-        return {
-            id: item.ref,
-            name: item.title ?? item.ref,
-            title: item.title ?? item.ref,
-            subtitle: item.subtitle ?? '',
-            source: 'Kaggle' as const,
-            url: `https://www.kaggle.com/datasets/${item.ref}`,
-            description: desc.slice(0, 2000),
-            domain: qu.domain.value ?? '',
-            subdomain: qu.subdomain.value ?? '',
-            task,
-            modality,
-            modalities: modality !== 'unknown' ? [modality] : [],
-            formats: [],
-            languages: [],
-            license: item.licenseName ?? 'unknown',
-            size,
-            sizeBytes,
-            downloads: item.downloadCount ?? null,
-            likes: item.voteCount ?? null,
-            creator: item.creatorName ?? 'unknown',
-            tags,
-            schema: {},
-            splits: {},
-            features: [],
-            sample_count: null,
-            image_resolution: null,
-            video: modality === 'video',
-            related_models: [],
-            raw_metadata: item,
-            evidence,
-            targetLabels: [],
-            metadataQuality: computeKaggleMetadataQuality(item, desc, tags),
-            matchScore: 0,
-            scoreBreakdown: { task: 0, modality: 0, domain: 0, subdomain: 0, target: 0, metadata: 0, semantic: 0, quality: 0, popularity: 0 },
-            rejected: false,
-            rejectionReason: null,
-            matchReason: '',
-        };
-    });
+            return {
+                id: ref,
+                name: title,
+                title,
+                subtitle,
+                source: 'Kaggle' as const,
+                url,
+                description: desc.slice(0, 2000),
+                domain: qu.domain.value ?? '',
+                subdomain: qu.subdomain.value ?? '',
+                task,
+                modality,
+                modalities: modality !== 'unknown' ? [modality] : [],
+                formats: [],
+                languages: [],
+                license: licenseName,
+                size,
+                sizeBytes,
+                downloads: downloadCount,
+                likes: voteCount,
+                creator: creatorName,
+                tags,
+                schema: { usabilityRating },
+                splits: {},
+                features: [],
+                sample_count: null,
+                image_resolution: null,
+                video: modality === 'video',
+                related_models: [],
+                raw_metadata: { ...raw, usabilityRating },
+                evidence,
+                targetLabels: [],
+                metadataQuality: computeKaggleMetadataQuality(norm, desc, tags),
+                matchScore: 0,
+                scoreBreakdown: { task: 0, modality: 0, domain: 0, subdomain: 0, target: 0, metadata: 0, semantic: 0, quality: 0, popularity: 0 },
+                rejected: false,
+                rejectionReason: null,
+                matchReason: '',
+            };
+        })
+        .filter(Boolean) as Partial<NormalizedDataset>[];
 
     const dur = Math.round(performance.now() - t0);
     if (trace) {

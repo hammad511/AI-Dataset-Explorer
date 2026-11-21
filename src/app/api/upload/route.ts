@@ -22,8 +22,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Auth check
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    if (!token) {
+    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET || 'AI_Dataset_Explorer_Secret_12345' });
+    if (!token || (!token.id && !token.email)) {
         return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
     }
 

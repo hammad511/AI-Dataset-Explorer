@@ -7,8 +7,8 @@ import { logSecurityEvent } from '@/server/security/securityLogger';
 export async function POST(req: Request) {
     const ip = extractIp(req);
 
-    // Rate limit: max 5 registrations per IP per hour
-    if (isRateLimited('register', ip, 5, 60 * 60 * 1000)) {
+    // Rate limit: max 10 registrations per IP per hour
+    if (isRateLimited('register', ip, 10, 60 * 60 * 1000)) {
         logSecurityEvent({
             eventType: 'RATE_LIMIT_EXCEEDED',
             severity: 'WARN',
@@ -16,7 +16,11 @@ export async function POST(req: Request) {
             endpoint: '/api/auth/register',
         });
         return NextResponse.json(
-            { message: 'Too many registration attempts. Please try again later.' },
+            {
+                success: false,
+                message: 'Too many registration attempts. Please try again later.',
+                error: 'Too many registration attempts. Please try again later.',
+            },
             { status: 429 }
         );
     }
@@ -26,7 +30,10 @@ export async function POST(req: Request) {
         try {
             body = await req.json();
         } catch {
-            return NextResponse.json({ message: 'Invalid JSON request format.' }, { status: 400 });
+            return NextResponse.json(
+                { success: false, message: 'Invalid JSON request format.', error: 'Invalid JSON request format.' },
+                { status: 400 }
+            );
         }
 
         const rawEmail = body.email;
@@ -36,18 +43,60 @@ export async function POST(req: Request) {
         const email = sanitizeEmail(rawEmail);
         const name = sanitizeText(rawName, 60);
 
+        if (!name || name.trim().length < 2) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: 'Please enter your full name (at least 2 characters).',
+                    error: 'Please enter your full name (at least 2 characters).',
+                },
+                { status: 400 }
+            );
+        }
+
         if (!email || !rawPassword) {
-            return NextResponse.json({ message: 'A valid email and password are required.' }, { status: 400 });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: 'A valid email and password are required.',
+                    error: 'A valid email and password are required.',
+                },
+                { status: 400 }
+            );
         }
 
         if (typeof rawPassword !== 'string' || rawPassword.length < 8) {
-            return NextResponse.json({ message: 'Password must be at least 8 characters long.' }, { status: 400 });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: 'Password must be at least 8 characters long.',
+                    error: 'Password must be at least 8 characters long.',
+                },
+                { status: 400 }
+            );
+        }
+
+        if (rawPassword.length > 128) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: 'Password cannot exceed 128 characters.',
+                    error: 'Password cannot exceed 128 characters.',
+                },
+                { status: 400 }
+            );
         }
 
         const existing = await findUserByEmail(email);
         if (existing) {
-            // Anti-enumeration: Return generic error or consistent status
-            return NextResponse.json({ message: 'An account with that email already exists or is unavailable.' }, { status: 409 });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: 'An account with that email already exists. Please sign in instead.',
+                    error: 'An account with that email already exists. Please sign in instead.',
+                },
+                { status: 409 }
+            );
         }
 
         const newUser = await createUser({
@@ -59,9 +108,11 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
             ok: true,
-            user: { id: newUser.id, name: newUser.name, email: newUser.email },
+            success: true,
+            user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role },
         });
     } catch (e: any) {
-        return NextResponse.json({ message: e.message || 'Registration failed.' }, { status: 500 });
+        const msg = e?.message || 'Registration failed.';
+        return NextResponse.json({ success: false, message: msg, error: msg }, { status: 500 });
     }
 }

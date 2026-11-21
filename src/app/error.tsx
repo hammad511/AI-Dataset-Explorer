@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect } from "react";
+import Link from "next/link";
+import { AlertTriangle, RotateCcw, Home } from "lucide-react";
 
 export default function Error({
   error,
@@ -14,39 +16,42 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center p-6">
-      <div className="max-w-md w-full p-8 rounded-3xl bg-card border border-red-500/20 backdrop-blur-xl text-center space-y-5 shadow-2xl">
-        <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 flex items-center justify-center mx-auto text-2xl">
-          ⚠️
+    <div className="min-h-screen bg-[#07090E] text-slate-100 flex items-center justify-center p-6">
+      <div className="max-w-md w-full obsidian-card p-8 border-rose-500/30 text-center space-y-5">
+        <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-6 h-6" />
         </div>
         <div className="space-y-2">
-          <span className="px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-mono font-semibold uppercase tracking-wider">
-            Application Error Shield
+          <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/25 text-[10px] font-mono font-semibold uppercase tracking-wider">
+            Workstation Recovery Shield
           </span>
-          <h2 className="text-xl font-bold text-primary">Explore Studio Encountered an Error</h2>
-          <p className="text-xs text-muted leading-relaxed">
-            {error.message || "An unexpected error occurred while rendering the page. State has been preserved where possible."}
+          <h2 className="text-lg font-bold text-slate-100">
+            Unexpected Workstation Fault
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            {error.message || "A client-side rendering issue occurred. Your session state has been preserved."}
           </p>
         </div>
 
         <div className="flex items-center justify-center gap-3 pt-2">
           <button
+            type="button"
             onClick={() => reset()}
-            className="px-5 py-2.5 rounded-xl bg-primary text-primary-inverse text-xs font-semibold hover:opacity-90 transition-opacity shadow-sm"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold cursor-pointer transition-lab"
           >
-            Try Again
+            <RotateCcw className="w-3.5 h-3.5" /> Retry Render
           </button>
-          <a
+          <Link
             href="/explore"
-            className="px-4 py-2.5 rounded-xl border border-subtle bg-card hover:bg-card-hover text-xs text-muted font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-white/10 bg-[#0D111A] hover:bg-[#131926] text-xs text-slate-300 font-medium transition-lab"
           >
-            Reset Search
-          </a>
+            <Home className="w-3.5 h-3.5" /> Reset Studio
+          </Link>
         </div>
 
         {error.digest && (
-          <p className="text-[10px] font-mono text-muted/60">
-            Error digest: {error.digest}
+          <p className="text-[10px] font-mono text-slate-600">
+            Digest: {error.digest}
           </p>
         )}
       </div>

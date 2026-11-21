@@ -29,6 +29,13 @@ export type SafeUser = Omit<StoredUser, 'passwordHash' | 'resetTokens'>;
 
 const USERS_FILE = path.join(process.cwd(), 'data', 'users.json');
 
+// Serialize writes in-process to avoid concurrent file rename collisions on Windows
+let writeQueue: Promise<void> = Promise.resolve();
+
+export function getAuthSecret(): string {
+    return process.env.NEXTAUTH_SECRET || 'AI_Dataset_Explorer_Secret_12345';
+}
+
 /**
  * Returns safe user object with sensitive hashes removed.
  */
@@ -59,13 +66,29 @@ export async function getAllUsers(): Promise<StoredUser[]> {
 }
 
 /**
- * Atomic write to user store with temporary file and rename to prevent corruption.
+ * Atomic write to user store with temporary file, Windows EPERM fallback, and serialized write queue.
  */
 async function saveAllUsers(users: StoredUser[]): Promise<void> {
-    const tempFile = `${USERS_FILE}.${crypto.randomUUID()}.tmp`;
-    const data = JSON.stringify(users, null, 2);
-    await fs.writeFile(tempFile, data, 'utf-8');
-    await fs.rename(tempFile, USERS_FILE);
+    const nextWrite = writeQueue.then(async () => {
+        const dir = path.dirname(USERS_FILE);
+        await fs.mkdir(dir, { recursive: true });
+        const tempFile = `${USERS_FILE}.${crypto.randomUUID()}.tmp`;
+        const data = JSON.stringify(users, null, 2);
+        await fs.writeFile(tempFile, data, 'utf-8');
+        try {
+            await fs.rename(tempFile, USERS_FILE);
+        } catch (err: any) {
+            if (err?.code === 'EPERM' || err?.code === 'EACCES' || err?.code === 'EBUSY') {
+                await fs.copyFile(tempFile, USERS_FILE);
+                await fs.unlink(tempFile).catch(() => {});
+            } else {
+                await fs.unlink(tempFile).catch(() => {});
+                throw err;
+            }
+        }
+    });
+    writeQueue = nextWrite.catch(() => {});
+    await nextWrite;
 }
 
 /**
@@ -139,9 +162,9 @@ export async function createUser(data: {
 /**
  * Updates a user's password and increments sessionVersion, invalidating all existing active sessions.
  */
-export async function updateUserPassword(userId: string, newPassword: string): Promise<void> {
-    if (!newPassword || newPassword.length < 8) {
-        throw new Error('Password must be at least 8 characters long.');
+export async function updateUserPassword(userId: string, newPassword: string): Promise<SafeUser> {
+    if (!newPassword || newPassword.length < 8 || newPassword.length > 128) {
+        throw new Error('Password must be between 8 and 128 characters long.');
     }
 
     const users = await getAllUsers();
@@ -168,6 +191,8 @@ export async function updateUserPassword(userId: string, newPassword: string): P
         email: users[userIndex].email,
         details: { newSessionVersion: users[userIndex].sessionVersion },
     });
+
+    return toSafeUser(users[userIndex]);
 }
 
 /**

@@ -57,12 +57,16 @@ class Settings(BaseSettings):
     # External Data Sources
     HUGGINGFACE_TOKEN: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices("HUGGINGFACE_TOKEN", "HUGGING_FACE_TOKEN"),
+        validation_alias=AliasChoices("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGING_FACE_TOKEN"),
     )
+    KAGGLE_API_TOKEN: Optional[str] = None
     KAGGLE_USERNAME: Optional[str] = None
     KAGGLE_KEY: Optional[str] = None
     SEMANTIC_SCHOLAR_API_KEY: Optional[str] = None
-    OPENALEX_EMAIL: Optional[str] = "researcher@example.com"
+    OPENALEX_API_KEY: Optional[str] = None
+    OPENALEX_EMAIL: Optional[str] = "research@example.com"
+    CONTACT_EMAIL: Optional[str] = "research@example.com"
+    NCBI_API_KEY: Optional[str] = None
 
     # Ranking Weights (Section 81)
     SEMANTIC_WEIGHT: float = 0.30

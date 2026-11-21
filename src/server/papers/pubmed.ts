@@ -20,6 +20,111 @@ export interface PubMedArticleRaw {
 
 const TIMEOUT_MS = 7500;
 
+export function getNcbiApiKey(): string {
+    return (process.env.NCBI_API_KEY || process.env.PUBMED_API_KEY || '').trim();
+}
+
+export function getNcbiEmail(): string {
+    return (
+        process.env.CONTACT_EMAIL ||
+        process.env.OPENALEX_EMAIL ||
+        process.env.CROSSREF_EMAIL ||
+        'research@example.com'
+    ).trim();
+}
+
+/**
+ * Builds standard NCBI E-Utilities query parameters (`tool=ai_dataset_explorer&email=...` + optional `&api_key=...`).
+ */
+export function buildNcbiAuthParams(): string {
+    const email = getNcbiEmail();
+    const apiKey = getNcbiApiKey();
+    let params = `&tool=ai_dataset_explorer&email=${encodeURIComponent(email)}`;
+    if (apiKey) {
+        params += `&api_key=${encodeURIComponent(apiKey)}`;
+    }
+    return params;
+}
+
+// Rate limiter state:
+// 10 RPS (100ms min interval) when NCBI_API_KEY is present; < 3 RPS (350ms min interval) when absent.
+let lastNcbiRequestTime = 0;
+let throttleChain: Promise<void> = Promise.resolve();
+
+export function getNcbiMinIntervalMs(): number {
+    return getNcbiApiKey() ? 105 : 350;
+}
+
+async function waitForNcbiRateSlot(): Promise<void> {
+    const minInterval = getNcbiMinIntervalMs();
+    const nextSlot = throttleChain.then(async () => {
+        const now = Date.now();
+        const elapsed = now - lastNcbiRequestTime;
+        if (elapsed < minInterval) {
+            await new Promise((r) => setTimeout(r, minInterval - elapsed));
+        }
+        lastNcbiRequestTime = Date.now();
+    });
+    throttleChain = nextSlot.catch(() => {});
+    await nextSlot;
+}
+
+export async function fetchNcbiWithRetry(
+    url: string,
+    timeoutMs: number = TIMEOUT_MS,
+    maxRetries: number = 2
+): Promise<Response | null> {
+    const baseDelayMs = 450;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        await waitForNcbiRateSlot();
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json, text/xml, application/xml',
+                    'User-Agent': 'ai_dataset_explorer/2.0',
+                },
+                signal: controller.signal,
+                cache: 'no-store',
+            });
+            clearTimeout(timeoutId);
+
+            if ((res.status === 429 || res.status === 503) && attempt < maxRetries) {
+                const retryAfterHeader = res.headers.get('retry-after');
+                const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : NaN;
+                const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+                    ? Math.min(retryAfterMs, 3000)
+                    : baseDelayMs * Math.pow(2, attempt);
+                console.warn(
+                    `[PUBMED] HTTP ${res.status} rate limit/service busy. Retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`
+                );
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+
+            if (res.status === 429) {
+                console.warn('[PUBMED] Rate limit (HTTP 429) exceeded after retries.');
+            }
+
+            return res;
+        } catch (err: any) {
+            clearTimeout(timeoutId);
+            if (attempt < maxRetries) {
+                const delay = baseDelayMs * Math.pow(2, attempt);
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+            console.warn('[PUBMED] Network error:', err?.message || err);
+            return null;
+        }
+    }
+
+    return null;
+}
+
 export async function searchPubMed(
     query: string,
     limit: number = 6,
@@ -35,50 +140,64 @@ export async function searchPubMed(
         return cached;
     }
 
-    const mailto = process.env.CROSSREF_EMAIL || 'support@datasetexplorer.local';
-    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(cleanQuery)}&retmode=json&retmax=${limit}&email=${encodeURIComponent(mailto)}&tool=AIDatasetExplorer`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const authParams = buildNcbiAuthParams();
+    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(cleanQuery)}&retmode=json&retmax=${limit}${authParams}`;
 
     try {
-        const searchRes = await fetch(esearchUrl, {
-            headers: { 'Accept': 'application/json' },
-            signal: controller.signal,
-            next: { revalidate: 3600 },
-        });
+        const searchRes = await fetchNcbiWithRetry(esearchUrl, TIMEOUT_MS, 2);
 
-        if (!searchRes.ok) {
-            clearTimeout(timeoutId);
-            if (trace) trace.pubmed = { success: false, httpStatus: searchRes.status };
+        if (!searchRes || !searchRes.ok) {
+            if (trace) trace.pubmed = { success: false, httpStatus: searchRes?.status ?? 0 };
             return [];
         }
 
-        const searchData = await searchRes.json();
+        const searchText = await searchRes.text();
+        let searchData: any;
+        try {
+            searchData = JSON.parse(searchText);
+        } catch {
+            console.warn('[PUBMED] Non-JSON esearch response received from NCBI.');
+            if (trace) trace.pubmed = { success: false, reason: 'Invalid JSON response from esearch' };
+            return [];
+        }
+
+        if (searchData?.error) {
+            console.warn('[PUBMED] NCBI esearch returned API error:', searchData.error);
+            if (trace) trace.pubmed = { success: false, reason: String(searchData.error) };
+            return [];
+        }
+
         const idList: string[] = searchData.esearchresult?.idlist || [];
 
         if (idList.length === 0) {
-            clearTimeout(timeoutId);
             providerRawCache.set(cacheKey, [], 60 * 60 * 1000);
             if (trace) trace.pubmed = { success: true, count: 0 };
             return [];
         }
 
-        const esummaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(',')}&retmode=json&email=${encodeURIComponent(mailto)}&tool=AIDatasetExplorer`;
-        const summaryRes = await fetch(esummaryUrl, {
-            headers: { 'Accept': 'application/json' },
-            signal: controller.signal,
-            next: { revalidate: 3600 },
-        });
+        const esummaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(',')}&retmode=json${authParams}`;
+        const summaryRes = await fetchNcbiWithRetry(esummaryUrl, TIMEOUT_MS, 2);
 
-        clearTimeout(timeoutId);
-
-        if (!summaryRes.ok) {
-            if (trace) trace.pubmed = { success: false, httpStatus: summaryRes.status };
+        if (!summaryRes || !summaryRes.ok) {
+            if (trace) trace.pubmed = { success: false, httpStatus: summaryRes?.status ?? 0 };
             return [];
         }
 
-        const summaryData = await summaryRes.json();
+        const summaryText = await summaryRes.text();
+        let summaryData: any;
+        try {
+            summaryData = JSON.parse(summaryText);
+        } catch {
+            console.warn('[PUBMED] Non-JSON esummary response received from NCBI.');
+            if (trace) trace.pubmed = { success: false, reason: 'Invalid JSON response from esummary' };
+            return [];
+        }
+
+        if (summaryData?.error) {
+            console.warn('[PUBMED] NCBI esummary returned API error:', summaryData.error);
+            if (trace) trace.pubmed = { success: false, reason: String(summaryData.error) };
+            return [];
+        }
         const resultDict = summaryData.result || {};
         const articles: PubMedArticleRaw[] = [];
 
@@ -125,10 +244,9 @@ export async function searchPubMed(
 
         return articles;
     } catch (err: any) {
-        clearTimeout(timeoutId);
-        const isAbort = err.name === 'AbortError';
-        if (trace) trace.pubmed = { success: false, reason: isAbort ? 'Request timed out' : err.message };
-        console.warn(`[PUBMED] Fetch failed for query "${cleanQuery}":`, err.message);
+        const isAbort = err?.name === 'AbortError';
+        if (trace) trace.pubmed = { success: false, reason: isAbort ? 'Request timed out' : err?.message };
+        console.warn(`[PUBMED] Fetch failed for query "${cleanQuery}":`, err?.message || err);
         return [];
     }
 }

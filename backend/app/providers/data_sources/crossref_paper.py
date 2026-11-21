@@ -2,8 +2,19 @@ import logging
 from typing import List, Dict, Any, Optional
 import httpx
 from backend.app.providers.data_sources.base import DataSourceAdapter
+from backend.app.providers.data_sources.arxiv_paper import get_polite_email
 
 logger = logging.getLogger(__name__)
+
+CROSSREF_SELECT_FIELDS = "DOI,title,author,published,abstract,is-referenced-by-count,URL,container-title"
+
+
+def get_crossref_headers() -> Dict[str, str]:
+    email = get_polite_email()
+    return {
+        "Accept": "application/json",
+        "User-Agent": f"AI-Dataset-Explorer/1.0 (mailto:{email})",
+    }
 
 
 class CrossrefPaperAdapter(DataSourceAdapter):
@@ -17,11 +28,17 @@ class CrossrefPaperAdapter(DataSourceAdapter):
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
         url = "https://api.crossref.org/works"
-        params = {"query": query, "rows": limit}
+        email = get_polite_email()
+        params = {
+            "query": query,
+            "rows": limit,
+            "select": CROSSREF_SELECT_FIELDS,
+            "mailto": email,
+        }
 
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params=params)
+                resp = await client.get(url, params=params, headers=get_crossref_headers())
                 if resp.status_code == 200:
                     data = resp.json()
                     items = (data.get("message") or {}).get("items", [])
@@ -36,7 +53,11 @@ class CrossrefPaperAdapter(DataSourceAdapter):
         url = f"https://api.crossref.org/works/{clean_doi}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url)
+                resp = await client.get(
+                    url,
+                    params={"mailto": get_polite_email()},
+                    headers=get_crossref_headers(),
+                )
                 if resp.status_code == 200:
                     data = resp.json()
                     return await self.normalize(data.get("message") or {})
@@ -53,12 +74,18 @@ class CrossrefPaperAdapter(DataSourceAdapter):
         for a in raw.get("author", []):
             given = a.get("given", "")
             family = a.get("family", "")
-            full = f"{given} {family}".strip()
+            full = f"{given} {family}".strip() or a.get("name", "")
             if full:
                 authors.append(full)
 
-        created_parts = (raw.get("created") or {}).get("date-parts") or [[]]
-        year = created_parts[0][0] if created_parts[0] else None
+        pub_parts = (
+            (raw.get("published") or {}).get("date-parts")
+            or (raw.get("published-print") or {}).get("date-parts")
+            or (raw.get("published-online") or {}).get("date-parts")
+            or (raw.get("created") or {}).get("date-parts")
+            or [[]]
+        )
+        year = pub_parts[0][0] if pub_parts and pub_parts[0] else None
 
         container = raw.get("container-title") or []
         venue = container[0] if container else "Crossref Publication"
@@ -88,7 +115,11 @@ class CrossrefPaperAdapter(DataSourceAdapter):
     async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get("https://api.crossref.org/works?rows=1")
+                resp = await client.get(
+                    "https://api.crossref.org/works?rows=1",
+                    params={"mailto": get_polite_email()},
+                    headers=get_crossref_headers(),
+                )
                 return resp.status_code == 200
         except Exception:
             return False

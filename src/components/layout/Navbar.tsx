@@ -4,6 +4,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
+import {
+  Cpu,
+  Compass,
+  GitCompareArrows,
+  Map,
+  Settings,
+  LogOut,
+  Sun,
+  Moon,
+  Menu,
+  X,
+  ArrowRight,
+  PanelLeft,
+} from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useSearchSession } from "@/hooks/useSearchSession";
 
@@ -14,7 +28,7 @@ export interface NavbarProps {
   isSidebarOpen?: boolean;
 }
 
-export function Navbar({ className = "", variant = "app", onToggleSidebar, isSidebarOpen }: NavbarProps) {
+export function Navbar({ className = "", variant = "landing", onToggleSidebar, isSidebarOpen }: NavbarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const { resolvedTheme, setTheme } = useTheme();
@@ -23,7 +37,6 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close profile dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
@@ -35,10 +48,6 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [profileMenuOpen]);
-
-  const toggleTheme = () => {
-    setTheme(resolvedTheme === "dark" ? "light" : "dark");
-  };
 
   const handleSignOut = async () => {
     setProfileMenuOpen(false);
@@ -53,36 +62,41 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
   };
 
   const userInitial = session?.user?.name?.charAt(0) || session?.user?.email?.charAt(0) || "U";
-  const userName = session?.user?.name || session?.user?.email || "User";
+  const userName = session?.user?.name || session?.user?.email || "Researcher";
   const userEmail = session?.user?.email || "";
 
   const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/explore", label: "Explore Studio" },
-    { href: "/benchmark", label: "Benchmark & Compare Lab", badge: pinnedAssets.length > 0 ? pinnedAssets.length : null },
-    { href: "/roadmap", label: "Pipeline & Implementation Roadmap" },
+    { href: "/", label: "Overview", icon: null },
+    { href: "/explore", label: "Explore", icon: Compass },
+    {
+      href: "/benchmark",
+      label: "Benchmarks",
+      icon: GitCompareArrows,
+      badge: pinnedAssets.length > 0 ? pinnedAssets.length : null,
+    },
+    { href: "/roadmap", label: "Roadmap", icon: Map },
   ];
 
   return (
-    <header className={`sticky top-0 z-50 w-full glass-nav transition-colors duration-200 isolate ${className}`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <header className={`sticky top-0 z-50 w-full glass-nav transition-lab isolate ${className}`}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-3 group">
-          <div className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center text-white font-bold text-sm shadow-accent-sm group-hover:scale-105 transition-transform duration-200">
-            ✦
+        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-slate-950 font-bold text-sm shadow-accent-sm group-hover:scale-105 transition-lab">
+            <Cpu className="w-4 h-4" />
           </div>
           <div className="flex flex-col">
-            <span className="font-bold text-base tracking-tight text-primary group-hover:text-accent-to transition">
+            <span className="font-bold text-sm tracking-tight text-primary">
               AI Dataset Explorer
             </span>
-            <span className="text-[10px] text-muted -mt-1 font-mono hidden sm:block">
-              Discovery · Benchmarks · Roadmaps
+            <span className="text-[10px] text-faint font-mono -mt-0.5 hidden sm:block">
+              Obsidian Research Lab · v2.4
             </span>
           </div>
         </Link>
 
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-1 bg-card-subtle p-1.5 rounded-full border border-subtle">
+        {/* Desktop Navigation */}
+        <nav className="hidden md:flex items-center gap-1 bg-card/80 p-1 rounded-xl border border-subtle">
           {navLinks.map((link) => {
             const isActive =
               pathname === link.href ||
@@ -93,15 +107,15 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
               <Link
                 key={link.href}
                 href={link.href}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-all duration-200 flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-lab flex items-center gap-1.5 ${
                   isActive
-                    ? "bg-accent text-white shadow-accent-sm font-bold"
-                    : "text-muted hover:text-primary hover:bg-card-hover"
+                    ? "bg-card-hover text-primary border border-strong font-semibold shadow-xs"
+                    : "text-muted hover:text-primary hover:bg-card-subtle border border-transparent"
                 }`}
               >
                 <span>{link.label}</span>
-                {typeof link.badge === 'number' && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono text-[10px] font-bold">
+                {typeof link.badge === "number" && (
+                  <span className="px-1.5 py-0.2 rounded-md bg-accent-subtle text-accent-from border border-accent/30 font-mono text-[10px] font-bold tabular-nums">
                     {link.badge}
                   </span>
                 )}
@@ -110,74 +124,67 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
           })}
         </nav>
 
-        {/* Right controls: Theme toggle + Auth / Profile + Mobile trigger */}
-        <div className="flex items-center gap-2.5">
+        {/* Right Controls */}
+        <div className="flex items-center gap-2 shrink-0">
+          {variant === "app" && onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className={`w-8 h-8 rounded-lg border border-subtle bg-card hover:bg-card-hover flex items-center justify-center transition-lab ${
+                isSidebarOpen ? "text-accent-from border-accent/40" : "text-muted hover:text-primary"
+              }`}
+              title="Toggle sidebar"
+              aria-label="Toggle sidebar"
+            >
+              <PanelLeft className="w-4 h-4" />
+            </button>
+          )}
+
           <button
-            onClick={toggleTheme}
-            className="w-9 h-9 rounded-xl border border-subtle bg-card hover:bg-card-hover text-secondary flex items-center justify-center transition-all duration-200"
+            type="button"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            className="w-8 h-8 rounded-lg border border-subtle bg-card hover:bg-card-hover text-muted hover:text-primary flex items-center justify-center transition-lab"
             title={`Switch to ${resolvedTheme === "dark" ? "light" : "dark"} mode`}
             aria-label="Toggle theme"
           >
             {resolvedTheme === "dark" ? (
-              <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
             ) : (
-              <svg className="w-4 h-4 text-slate-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-              </svg>
+              <Moon className="w-3.5 h-3.5 text-slate-700" />
             )}
           </button>
 
-          {/* Sidebar Toggle Button (if provided) */}
-          {onToggleSidebar && (
-            <button
-              onClick={onToggleSidebar}
-              className={`w-9 h-9 rounded-xl border border-subtle bg-card hover:bg-card-hover text-secondary hover:text-white flex items-center justify-center transition-all duration-200 ${
-                isSidebarOpen ? "bg-accent/20 border-accent/40 text-white" : ""
-              }`}
-              title="Toggle recent searches & settings panel"
-              aria-label="Toggle recent searches sidebar"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth="2" />
-                <path d="M15 4v16" strokeWidth="2" />
-              </svg>
-            </button>
-          )}
-
-          {/* Auth Controls & Get Started Option */}
           {!session?.user ? (
             <div className="flex items-center gap-2">
               <Link
                 href="/login"
-                className="hidden sm:inline-flex px-3.5 py-1.5 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover border border-transparent hover:border-subtle rounded-xl transition"
+                className="hidden sm:inline-flex px-3 py-1.5 text-xs font-medium text-secondary hover:text-primary hover:bg-card-hover border border-transparent hover:border-subtle rounded-lg transition-lab"
               >
                 Sign In
               </Link>
               <Link
-                href="/signup"
-                className="px-4 py-1.5 text-xs font-bold rounded-xl bg-accent text-white shadow-accent-sm hover:brightness-110 active:scale-95 transition flex items-center gap-1.5"
+                href="/explore"
+                className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-accent text-slate-950 shadow-accent-sm hover:brightness-110 transition-lab flex items-center gap-1.5"
               >
-                <span>Get Started</span>
-                <span className="text-xs font-bold">→</span>
+                <span>Open Workstation</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <Link
                 href="/explore"
-                className="hidden sm:inline-flex px-4 py-1.5 text-xs font-bold rounded-xl bg-accent text-white shadow-accent-sm hover:brightness-110 active:scale-95 transition items-center gap-1.5"
+                className="hidden sm:inline-flex px-3.5 py-1.5 text-xs font-bold rounded-lg bg-accent text-slate-950 shadow-accent-sm hover:brightness-110 transition-lab items-center gap-1.5"
               >
-                <span>Get Started</span>
-                <span className="text-xs font-bold">→</span>
+                <span>Launch Lab</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Link>
 
-              {/* Profile Avatar & Dropdown */}
               <div className="relative" ref={profileMenuRef}>
                 <button
+                  type="button"
                   onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                  className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-500 text-white font-bold text-xs flex items-center justify-center shadow-accent-sm hover:brightness-110 active:scale-95 transition border border-white/20"
+                  className="w-8 h-8 rounded-lg bg-accent-subtle border border-accent/40 text-accent-from font-bold text-xs flex items-center justify-center hover:bg-sky-500/20 transition-lab"
                   title={`Signed in as ${userName}`}
                   aria-label="User profile"
                   aria-expanded={profileMenuOpen}
@@ -186,51 +193,52 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
                 </button>
 
                 {profileMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl glass-card border border-subtle shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="px-4 py-2.5 border-b border-subtle">
+                  <div className="absolute right-0 top-full mt-2 w-56 rounded-xl obsidian-card p-1.5 z-50 shadow-2xl">
+                    <div className="px-3 py-2 border-b border-subtle">
                       <p className="text-xs font-bold text-primary truncate">{userName}</p>
-                      <p className="text-[11px] text-muted truncate">{userEmail}</p>
+                      <p className="text-[11px] font-mono text-faint truncate">{userEmail}</p>
                     </div>
-                    <div className="py-1">
+                    <div className="py-1 space-y-0.5">
                       <Link
                         href="/explore"
                         onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover transition"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-secondary hover:text-primary hover:bg-card-hover transition-lab"
                       >
-                        <span>✦</span>
+                        <Compass className="w-3.5 h-3.5 text-accent-from" />
                         <span>Explore Studio</span>
                       </Link>
                       <Link
                         href="/benchmark"
                         onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover transition"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-secondary hover:text-primary hover:bg-card-hover transition-lab"
                       >
-                        <span>⚖️</span>
+                        <GitCompareArrows className="w-3.5 h-3.5 text-accent-from" />
                         <span>Benchmark Lab</span>
                       </Link>
                       <Link
                         href="/roadmap"
                         onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover transition"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-secondary hover:text-primary hover:bg-card-hover transition-lab"
                       >
-                        <span>🛠️</span>
+                        <Map className="w-3.5 h-3.5 text-accent-from" />
                         <span>Pipeline Roadmap</span>
                       </Link>
                       <Link
                         href="/settings"
                         onClick={() => setProfileMenuOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover transition"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-secondary hover:text-primary hover:bg-card-hover transition-lab"
                       >
-                        <span>⚙</span>
-                        <span>Settings & Preferences</span>
+                        <Settings className="w-3.5 h-3.5 text-muted" />
+                        <span>Settings & Quota</span>
                       </Link>
                     </div>
                     <div className="pt-1 border-t border-subtle">
                       <button
+                        type="button"
                         onClick={handleSignOut}
-                        className="w-full text-left flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 transition"
+                        className="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-status-rose hover:bg-rose-500/10 transition-lab"
                       >
-                        <span>🚪</span>
+                        <LogOut className="w-3.5 h-3.5" />
                         <span>Sign Out</span>
                       </button>
                     </div>
@@ -240,28 +248,20 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
             </div>
           )}
 
-          {/* Mobile Hamburger Button */}
           <button
+            type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden w-9 h-9 rounded-xl border border-subtle bg-card hover:bg-card-hover text-secondary flex items-center justify-center transition"
+            className="md:hidden w-8 h-8 rounded-lg border border-subtle bg-card hover:bg-card-hover text-secondary flex items-center justify-center transition-lab"
             aria-label="Toggle menu"
           >
-            {mobileMenuOpen ? (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            )}
+            {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Navigation Drawer */}
+      {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden glass-card border-b border-subtle px-4 pt-2 pb-6 space-y-3 animate-in fade-in slide-in-from-top-3 duration-200">
+        <div className="md:hidden border-b border-subtle bg-rail px-4 pt-2 pb-5 space-y-2">
           <nav className="flex flex-col space-y-1">
             {navLinks.map((link) => {
               const isActive = pathname === link.href || (link.href !== "/" && pathname?.startsWith(link.href));
@@ -270,9 +270,9 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
                   key={link.href}
                   href={link.href}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`px-4 py-2.5 text-sm font-semibold rounded-xl transition ${
+                  className={`px-3 py-2 text-xs font-semibold rounded-lg transition-lab ${
                     isActive
-                      ? "bg-accent text-white shadow-accent-sm"
+                      ? "bg-accent-subtle text-accent-from border border-accent/30"
                       : "text-secondary hover:text-primary hover:bg-card-hover"
                   }`}
                 >
@@ -283,42 +283,29 @@ export function Navbar({ className = "", variant = "app", onToggleSidebar, isSid
             <Link
               href="/settings"
               onClick={() => setMobileMenuOpen(false)}
-              className="px-4 py-2.5 text-sm font-semibold text-secondary hover:text-primary hover:bg-card-hover rounded-xl transition"
+              className="px-3 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-card-hover rounded-lg"
             >
-              Settings & Preferences
+              Settings & Billing
             </Link>
           </nav>
 
-          {/* Mobile Auth / Get Started Options */}
-          <div className="pt-3 border-t border-subtle flex flex-col gap-2">
-            <Link
-              href={session?.user ? "/explore" : "/signup"}
-              onClick={() => setMobileMenuOpen(false)}
-              className="w-full text-center px-4 py-2.5 text-sm font-bold rounded-xl bg-accent text-white shadow-accent-sm hover:brightness-110 transition"
-            >
-              Get Started →
-            </Link>
+          <div className="pt-2 border-t border-subtle flex flex-col gap-2">
             {!session?.user ? (
               <Link
                 href="/login"
                 onClick={() => setMobileMenuOpen(false)}
-                className="w-full text-center px-4 py-2 text-sm font-semibold text-secondary hover:text-primary hover:bg-card-hover rounded-xl border border-subtle transition"
+                className="w-full text-center px-4 py-2 text-xs font-semibold text-secondary border border-subtle rounded-lg"
               >
                 Sign In
               </Link>
             ) : (
-              <div className="flex items-center justify-between px-2 pt-2">
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-bold text-primary truncate">{userName}</span>
-                  <span className="text-[11px] text-muted truncate">{userEmail}</span>
-                </div>
-                <button
-                  onClick={handleSignOut}
-                  className="px-3 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-500/10 rounded-lg transition"
-                >
-                  Sign Out
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="w-full text-center px-4 py-2 text-xs font-semibold text-status-rose bg-rose-500/10 border border-rose-500/20 rounded-lg"
+              >
+                Sign Out
+              </button>
             )}
           </div>
         </div>

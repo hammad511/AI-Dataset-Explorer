@@ -1,23 +1,30 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers/Providers";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const plusJakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
-  variable: "--font-ibm-plex-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
-  title: "AI Dataset Explorer",
-  description: "Discover datasets, models, papers, and roadmaps for AI projects.",
+  title: "AI Dataset Explorer · Autonomous ML Research & Architecture Workstation",
+  description:
+    "Obsidian Research Lab workstation for multi-source dataset discovery, architecture benchmarking, VRAM profiling, evidence-verified literature, and execution blueprints.",
 };
 
 export default function RootLayout({
@@ -28,9 +35,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${spaceGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`}
+      className={`${plusJakarta.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      data-theme="dark"
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col bg-page text-primary selection:bg-sky-400/30 selection:text-white">
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -5,6 +5,7 @@
  */
 
 import { UnifiedCandidate, StructuredQueryUnderstanding } from '../types';
+import { buildOpenAlexAuthQueryParams, getOpenAlexEmail } from '@/server/papers/openAlex';
 
 const OPENALEX_API = 'https://api.openalex.org/works';
 
@@ -15,14 +16,23 @@ export async function fetchOpenAlexPapers(
 ): Promise<UnifiedCandidate[]> {
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
+    const authParams = buildOpenAlexAuthQueryParams();
+    const mailto = getOpenAlexEmail();
 
     for (const q of queries.slice(0, 3)) {
         try {
-            const url = `${OPENALEX_API}?search=${encodeURIComponent(q)}&per-page=20&mailto=research@aidatasetexplorer.org`;
+            const url = `${OPENALEX_API}?search=${encodeURIComponent(q)}&per-page=20&${authParams}`;
             const ctrl = new AbortController();
             const tid = setTimeout(() => ctrl.abort(), 6000);
 
-            const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
+            const res = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'User-Agent': `AIDatasetExplorer/2.0 (mailto:${mailto})`,
+                },
+                signal: ctrl.signal,
+                cache: 'no-store',
+            });
             clearTimeout(tid);
 
             if (!res.ok) continue;

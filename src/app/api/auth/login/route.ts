@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { encode } from 'next-auth/jwt';
 import bcrypt from 'bcryptjs';
-import { findUserByEmail } from '@/server/auth/userStore';
+import { findUserByEmail, getAuthSecret } from '@/server/auth/userStore';
 import { isAccountLocked, recordFailedAttempt, resetFailedAttempts } from '@/server/auth/accountLockout';
-import { extractIp, isRateLimited } from '@/server/security/rate-limit';
+import { extractIp, isRateLimited, resetRateLimit } from '@/server/security/rate-limit';
 import { logSecurityEvent } from '@/server/security/securityLogger';
 import { sanitizeEmail } from '@/server/security/sanitize';
 
 export const dynamic = 'force-dynamic';
 
-const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || 'AI_Dataset_Explorer_Secret_12345';
+const NEXTAUTH_SECRET = getAuthSecret();
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
 
 /**
@@ -97,7 +97,17 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 4. Verify Password
+        // 4. Verify Password (handle OAuth-only accounts without locking them out)
+        if (!user.passwordHash) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'This account uses Google Sign-In. Please continue with Google or use Forgot Password to set a password.',
+                },
+                { status: 401, headers }
+            );
+        }
+
         const passwordValid = await bcrypt.compare(password, user.passwordHash);
         if (!passwordValid) {
             const failStatus = recordFailedAttempt(email);
@@ -124,8 +134,10 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 5. Successful Authentication: Reset lockout counters
+        // 5. Successful Authentication: Reset lockout and IP rate-limit counters
         resetFailedAttempts(email);
+        resetRateLimit('login', ip);
+        resetRateLimit('login-callback', ip);
 
         logSecurityEvent({
             eventType: 'AUTH_LOGIN_SUCCESS',

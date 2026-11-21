@@ -285,27 +285,69 @@ export async function searchResearchPapers(input: ResearchSearchInput): Promise<
     }
 
     if (arxivRes.status === 'fulfilled' && Array.isArray(arxivRes.value)) {
-        audit.arxiv = { called: true, success: true, count: arxivRes.value.length };
+        const arxivTrace = (traceArxiv.arxiv as Record<string, any>) || {};
+        audit.arxiv = {
+            called: true,
+            success: arxivTrace.success !== false,
+            count: arxivRes.value.length,
+            ...(arxivTrace.httpStatus ? { httpStatus: arxivTrace.httpStatus } : {}),
+            ...(arxivTrace.reason ? { reason: arxivTrace.reason } : {}),
+        };
         for (const raw of arxivRes.value) {
-            rawPapers.push(normalizeArxiv(raw));
+            try {
+                rawPapers.push(normalizeArxiv(raw));
+            } catch (normErr: any) {
+                console.warn('[ARXIV] Normalization skipped malformed item:', normErr?.message || normErr);
+            }
         }
     } else {
-        audit.arxiv = { called: true, success: false, error: arxivRes.status === 'rejected' ? arxivRes.reason?.message : 'Failed' };
+        audit.arxiv = { called: true, success: false, count: 0, error: arxivRes.status === 'rejected' ? arxivRes.reason?.message : 'Failed' };
     }
 
     if (crossrefRes.status === 'fulfilled' && Array.isArray(crossrefRes.value)) {
-        audit.crossref = { called: true, success: true, count: crossrefRes.value.length };
+        const crossTrace = (traceCross.crossref as Record<string, any>) || {};
+        audit.crossref = {
+            called: true,
+            success: crossTrace.success !== false,
+            count: crossrefRes.value.length,
+            ...(crossTrace.httpStatus ? { httpStatus: crossTrace.httpStatus } : {}),
+            ...(crossTrace.reason ? { reason: crossTrace.reason } : {}),
+        };
         for (const raw of crossrefRes.value) {
-            rawPapers.push(normalizeCrossref(raw));
+            try {
+                rawPapers.push(normalizeCrossref(raw));
+            } catch (normErr: any) {
+                console.warn('[CROSSREF] Normalization skipped malformed item:', normErr?.message || normErr);
+            }
         }
     } else {
-        audit.crossref = { called: true, success: false, error: crossrefRes.status === 'rejected' ? crossrefRes.reason?.message : 'Failed' };
+        audit.crossref = { called: true, success: false, count: 0, error: crossrefRes.status === 'rejected' ? crossrefRes.reason?.message : 'Failed' };
     }
 
-    if (isBiomedical && pubmedRes.status === 'fulfilled' && Array.isArray(pubmedRes.value)) {
-        audit.pubmed = { called: true, success: true, count: pubmedRes.value.length };
-        for (const raw of pubmedRes.value) {
-            rawPapers.push(normalizePubMed(raw));
+    if (isBiomedical) {
+        if (pubmedRes.status === 'fulfilled' && Array.isArray(pubmedRes.value)) {
+            const pubTrace = (tracePub.pubmed as Record<string, any>) || {};
+            audit.pubmed = {
+                called: true,
+                success: pubTrace.success !== false,
+                count: pubmedRes.value.length,
+                ...(pubTrace.httpStatus ? { httpStatus: pubTrace.httpStatus } : {}),
+                ...(pubTrace.reason ? { reason: pubTrace.reason } : {}),
+            };
+            for (const raw of pubmedRes.value) {
+                try {
+                    rawPapers.push(normalizePubMed(raw));
+                } catch (normErr: any) {
+                    console.warn('[PUBMED] Normalization skipped malformed item:', normErr?.message || normErr);
+                }
+            }
+        } else {
+            audit.pubmed = {
+                called: true,
+                success: false,
+                count: 0,
+                error: pubmedRes.status === 'rejected' ? pubmedRes.reason?.message : 'Failed',
+            };
         }
     }
 

@@ -16,7 +16,13 @@ import {
     modelCardCache, modelConfigCache,
     modelCardKey, modelConfigKey, searchResultCache, searchKey
 } from '../cache/metadataCache';
-import { getHuggingFaceHeaders } from '@/server/providers/huggingface';
+import {
+    getHuggingFaceHeaders,
+    fetchHuggingFaceWithRetry,
+    HF_EXPAND_QUERY_PARAMS,
+    extractModelParameterSize,
+    extractHuggingFaceLicense,
+} from '@/server/providers/huggingface';
 
 const HF_API = 'https://huggingface.co/api';
 const HF_MODELS_ENDPOINT = `${HF_API}/models`;
@@ -28,18 +34,13 @@ interface FetchDiagnostics {
 }
 
 async function hfFetch(url: string, headers: Record<string, string>, timeoutMs: number, diagnostics?: FetchDiagnostics): Promise<Response | null> {
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-        const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-        clearTimeout(tid);
-        return res;
-    } catch (e: any) {
-        clearTimeout(tid);
-        if (diagnostics) diagnostics.networkFailures += 1;
-        console.error('[Hugging Face API] Model fetch error:', url.slice(0, 100), e?.message || e);
-        return null;
-    }
+    return fetchHuggingFaceWithRetry(url, headers, {
+        timeoutMs,
+        maxRetries: 2,
+        onNetworkFailure: () => {
+            if (diagnostics) diagnostics.networkFailures += 1;
+        },
+    });
 }
 
 // ── Model card fetching ───────────────────────────────────────────────────────
@@ -366,8 +367,8 @@ export async function searchHuggingFaceModels(
             continue;
         }
 
-        // Search clean keyword query
-        let url = `${HF_MODELS_ENDPOINT}?search=${encodeURIComponent(q)}&sort=downloads&direction=-1&limit=15`;
+        // Search clean keyword query with expanded metadata fields
+        let url = `${HF_MODELS_ENDPOINT}?search=${encodeURIComponent(q)}&sort=downloads&direction=-1&limit=15&${HF_EXPAND_QUERY_PARAMS}`;
         if (pipelineTag) {
             url += `&pipeline_tag=${encodeURIComponent(pipelineTag)}`;
         }
@@ -404,7 +405,7 @@ export async function searchHuggingFaceModels(
         if (cachedTag !== null) {
             rawResults.push(...(cachedTag as any[]));
         } else {
-            const urlTag = `${HF_MODELS_ENDPOINT}?search=${encodeURIComponent(primaryQ)}&pipeline_tag=${encodeURIComponent(pipelineTag)}&sort=downloads&direction=-1&limit=10`;
+            const urlTag = `${HF_MODELS_ENDPOINT}?search=${encodeURIComponent(primaryQ)}&pipeline_tag=${encodeURIComponent(pipelineTag)}&sort=downloads&direction=-1&limit=10&${HF_EXPAND_QUERY_PARAMS}`;
             console.log(`[Hugging Face API] Querying fallback pipeline models: "${primaryQ}" (pipeline: ${pipelineTag})`);
             const resTag = await hfFetch(urlTag, headers, TIMEOUT, diagnostics);
             if (resTag && resTag.ok) {
@@ -476,6 +477,8 @@ async function enrichModel(
 
     // Extract architecture with evidence
     const arch = extractArchitecture(modelId, tags, config, cardText, pipelineTag);
+    const { parameters: expandedParams } = extractModelParameterSize(m);
+    const resolvedParameters = arch.parameters ?? expandedParams;
 
     // Training datasets
     const trainingDatasets = extractTrainingDatasets(tags, cardText);
@@ -484,9 +487,7 @@ async function enrichModel(
     const modalities = inferModelModalities(pipelineTag, tags, cardText, arch.name);
 
     // License
-    const license = tags.find(t => t.startsWith('license:'))?.replace('license:', '').replace(/-/g, ' ')
-        ?? (config as any)?.license
-        ?? 'unknown';
+    const license = extractHuggingFaceLicense({ ...m, tags, license: (config as any)?.license });
 
     // Languages
     const languages: string[] = tags
@@ -499,7 +500,7 @@ async function enrichModel(
         { value: modelId, state: 'CONFIRMED' as const, confidence: 1.0, source: 'HuggingFace metadata', verified: true },
         { value: arch.name, state: arch.state, confidence: arch.confidence, source: arch.source, verified: arch.state === 'CONFIRMED' },
         { value: pipelineTag || 'unknown', state: pipelineTag ? 'CONFIRMED' as const : 'UNKNOWN' as const, confidence: pipelineTag ? 0.9 : 0, source: 'HF pipeline_tag', verified: !!pipelineTag },
-        ...(arch.parameters != null ? [{ value: String(arch.parameters), state: 'CONFIRMED' as const, confidence: 0.9, source: 'config.json', verified: true }] : []),
+        ...(resolvedParameters != null ? [{ value: String(resolvedParameters), state: 'CONFIRMED' as const, confidence: 0.9, source: arch.parameters != null ? 'config.json' : 'HF expanded metadata', verified: true }] : []),
     ];
 
     return {
@@ -510,7 +511,7 @@ async function enrichModel(
         task: pipelineTag ? pipelineTag.replace(/-/g, ' ') : 'unknown',
         architecture: arch.name,
         base_model: arch.baseModel,
-        parameters: arch.parameters,
+        parameters: resolvedParameters,
         modality: modalities[0] ?? 'unknown',
         modalities,
         languages,

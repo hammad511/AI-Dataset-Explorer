@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { findUserById, findUserByEmail } from '@/server/auth/userStore';
+import { findUserById, findUserByEmail, getAuthSecret } from '@/server/auth/userStore';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     headers.set('Cache-Control', 'private, no-cache, no-store, max-age=0, must-revalidate');
 
     try {
-        const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+        const token = await getToken({ req, secret: getAuthSecret() });
 
         if (!token || (!token.id && !token.email)) {
             return NextResponse.json(

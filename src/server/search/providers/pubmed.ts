@@ -6,6 +6,7 @@
  */
 
 import { UnifiedCandidate, StructuredQueryUnderstanding, NormalizedSearchResult } from '../types';
+import { buildNcbiAuthParams, fetchNcbiWithRetry } from '@/server/papers/pubmed';
 
 const PUBMED_SEARCH_API = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi';
 const PUBMED_FETCH_API = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi';
@@ -76,6 +77,7 @@ export async function fetchPubMedPapers(
 ): Promise<UnifiedCandidate[]> {
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
+    const authParams = buildNcbiAuthParams();
 
     for (let tierIdx = 0; tierIdx < Math.min(queries.length, 3); tierIdx++) {
         const q = queries[tierIdx];
@@ -83,31 +85,27 @@ export async function fetchPubMedPapers(
 
         try {
             // Step 1: ESearch to get PubMed IDs
-            const searchUrl = `${PUBMED_SEARCH_API}?db=pubmed&term=${encodeURIComponent(q)}&retmode=json&retmax=12`;
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
+            const searchUrl = `${PUBMED_SEARCH_API}?db=pubmed&term=${encodeURIComponent(q)}&retmode=json&retmax=12${authParams}`;
+            const searchRes = await fetchNcbiWithRetry(searchUrl, 6000, 2);
 
-            const searchRes = await fetch(searchUrl, { signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
+            if (!searchRes || !searchRes.ok) continue;
 
-            if (!searchRes.ok) continue;
-
-            const searchData = await searchRes.json();
+            const searchData = await searchRes.json().catch(() => null);
+            if (!searchData || searchData.error) continue;
             const idList: string[] = searchData.esearchresult?.idlist || [];
             if (idList.length === 0) continue;
 
             // Step 2: Try EFetch for authentic full abstracts in XML
             let parsedXml: Record<string, any> = {};
             try {
-                const fetchUrl = `${PUBMED_FETCH_API}?db=pubmed&id=${idList.join(',')}&retmode=xml`;
-                const ctrl2 = new AbortController();
-                const tid2 = setTimeout(() => ctrl2.abort(), 6000);
-                const fetchRes = await fetch(fetchUrl, { signal: ctrl2.signal, cache: 'no-store' });
-                clearTimeout(tid2);
+                const fetchUrl = `${PUBMED_FETCH_API}?db=pubmed&id=${idList.join(',')}&retmode=xml${authParams}`;
+                const fetchRes = await fetchNcbiWithRetry(fetchUrl, 6000, 2);
 
-                if (fetchRes.ok) {
+                if (fetchRes && fetchRes.ok) {
                     const xmlText = await fetchRes.text();
-                    parsedXml = parsePubMedXml(xmlText);
+                    if (!/<ERROR>/i.test(xmlText)) {
+                        parsedXml = parsePubMedXml(xmlText);
+                    }
                 }
             } catch {
                 // EFetch failed, fallback to ESummary below
@@ -119,14 +117,13 @@ export async function fetchPubMedPapers(
 
             if (missingIds.length > 0) {
                 try {
-                    const summaryUrl = `${PUBMED_SUMMARY_API}?db=pubmed&id=${missingIds.join(',')}&retmode=json`;
-                    const ctrl3 = new AbortController();
-                    const tid3 = setTimeout(() => ctrl3.abort(), 5000);
-                    const sumRes = await fetch(summaryUrl, { signal: ctrl3.signal, cache: 'no-store' });
-                    clearTimeout(tid3);
-                    if (sumRes.ok) {
-                        const sumData = await sumRes.json();
-                        summaryMap = sumData.result || {};
+                    const summaryUrl = `${PUBMED_SUMMARY_API}?db=pubmed&id=${missingIds.join(',')}&retmode=json${authParams}`;
+                    const sumRes = await fetchNcbiWithRetry(summaryUrl, 5000, 2);
+                    if (sumRes && sumRes.ok) {
+                        const sumData = await sumRes.json().catch(() => null);
+                        if (sumData && !sumData.error) {
+                            summaryMap = sumData.result || {};
+                        }
                     }
                 } catch {
                     // Ignore summary error

@@ -5,41 +5,15 @@
  */
 
 import { UnifiedCandidate, StructuredQueryUnderstanding } from '../types';
+import {
+    getArxivUserAgent,
+    waitForArxivRateSlot,
+    parseArxivAtomXml,
+    normalizeArxivIdentifier,
+} from '@/server/papers/arxiv';
+import { providerRawCache, buildPaperSearchKey } from '@/server/papers/paperCache';
 
 const ARXIV_API = 'https://export.arxiv.org/api/query';
-
-function parseArxivXml(xml: string): any[] {
-    const entries: any[] = [];
-    const entryMatches = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
-
-    for (const entryStr of entryMatches) {
-        const idMatch = entryStr.match(/<id>(.*?)<\/id>/);
-        const titleMatch = entryStr.match(/<title>(.*?)<\/title>/);
-        const summaryMatch = entryStr.match(/<summary>(.*?)<\/summary>/);
-        const publishedMatch = entryStr.match(/<published>(.*?)<\/published>/);
-        const doiMatch = entryStr.match(/<arxiv:doi.*?>(.*?)<\/arxiv:doi>/);
-
-        const authors: string[] = [];
-        const authorMatches = entryStr.match(/<author>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<\/author>/g) || [];
-        for (const authStr of authorMatches) {
-            const nameMatch = authStr.match(/<name>(.*?)<\/name>/);
-            if (nameMatch) authors.push(nameMatch[1].trim());
-        }
-
-        const id = idMatch ? idMatch[1].trim() : '';
-        const rawTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
-        const summary = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
-        const published = publishedMatch ? publishedMatch[1].trim() : '';
-        const year = published ? parseInt(published.slice(0, 4), 10) : null;
-        const doi = doiMatch ? doiMatch[1].trim() : null;
-
-        if (id && rawTitle) {
-            entries.push({ id, title: rawTitle, summary, authors, year, doi });
-        }
-    }
-
-    return entries;
-}
 
 export async function fetchArxivPapers(
     queries: string[],
@@ -51,39 +25,59 @@ export async function fetchArxivPapers(
 
     for (const q of queries.slice(0, 2)) {
         try {
-            const searchQuery = `all:${encodeURIComponent(q)}`;
-            const url = `${ARXIV_API}?search_query=${searchQuery}&start=0&max_results=15&sortBy=relevance&sortOrder=descending`;
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
+            const cleanQ = (q || '').trim();
+            if (!cleanQ) continue;
 
-            const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
+            const cacheKey = buildPaperSearchKey('arxiv', `${cleanQ}:15`);
+            let entries = providerRawCache.get(cacheKey);
 
-            if (!res.ok) continue;
+            if (!entries) {
+                await waitForArxivRateSlot();
+                const searchQuery = `all:${encodeURIComponent(cleanQ)}`;
+                const url = `${ARXIV_API}?search_query=${searchQuery}&start=0&max_results=15&sortBy=relevance&sortOrder=descending`;
+                const ctrl = new AbortController();
+                const tid = setTimeout(() => ctrl.abort(), 7500);
 
-            const xmlText = await res.text();
-            const entries = parseArxivXml(xmlText);
+                const res = await fetch(url, {
+                    headers: {
+                        'Accept': 'application/atom+xml, application/xml, text/xml',
+                        'User-Agent': getArxivUserAgent(),
+                    },
+                    signal: ctrl.signal,
+                    cache: 'no-store',
+                });
+                clearTimeout(tid);
+
+                if (!res.ok) continue;
+
+                const xmlText = await res.text();
+                entries = parseArxivAtomXml(xmlText);
+                providerRawCache.set(cacheKey, entries, 60 * 60 * 1000);
+            }
 
             for (const entry of entries) {
-                if (seenIds.has(entry.id)) continue;
-                seenIds.add(entry.id);
+                const arxivId = normalizeArxivIdentifier(entry.arxivId || entry.id);
+                if (!arxivId || seenIds.has(arxivId)) continue;
+                seenIds.add(arxivId);
 
-                const arxivId = entry.id.split('/abs/').pop() || entry.id;
+                const year = entry.published ? parseInt(entry.published.slice(0, 4), 10) : null;
+                const landingUrl = `https://arxiv.org/abs/${arxivId}`;
+                const pdfUrl = `https://arxiv.org/pdf/${arxivId}.pdf`;
 
                 candidates.push({
-                    id: entry.id,
+                    id: landingUrl,
                     source: 'arxiv',
                     type: 'paper',
                     title: entry.title,
                     name: entry.title,
                     description: entry.summary,
                     authors: entry.authors,
-                    year: entry.year,
+                    year,
                     venue: 'arXiv Preprint',
-                    doi: entry.doi,
-                    url: entry.id,
-                    pdfUrl: `https://arxiv.org/pdf/${arxivId}.pdf`,
-                    retrievalQuery: q,
+                    doi: entry.doi || null,
+                    url: landingUrl,
+                    pdfUrl,
+                    retrievalQuery: cleanQ,
                     retrievalTier: queries.indexOf(q) + 1,
                     metadata: {
                         isPreprint: true,

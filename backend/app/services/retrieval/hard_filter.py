@@ -119,7 +119,7 @@ class HardConstraintFilter:
         max_gpu_vram = profile.compute_constraints.gpu_memory_gb
         max_latency_ms = profile.compute_constraints.latency_ms
         req_modalities = [m.lower() for m in profile.modalities]
-        req_tasks = [t.lower() for t in profile.tasks]
+        req_tasks = [(t.name if hasattr(t, "name") else str(t)).lower() for t in profile.tasks]
 
         for cand, score in candidates:
             # Hard Modality Check

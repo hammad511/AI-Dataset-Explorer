@@ -1,8 +1,9 @@
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 import httpx
 from backend.app.providers.data_sources.base import DataSourceAdapter
-from backend.app.core.config import settings
+from backend.app.providers.data_sources.huggingface_dataset import get_huggingface_headers
 
 logger = logging.getLogger(__name__)
 
@@ -17,29 +18,40 @@ class HuggingFaceModelAdapter(DataSourceAdapter):
         return "huggingface"
 
     async def search(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
-        headers = {}
-        if settings.HUGGINGFACE_TOKEN:
-            headers["Authorization"] = f"Bearer {settings.HUGGINGFACE_TOKEN}"
+        headers = get_huggingface_headers()
+        url = (
+            "https://huggingface.co/api/models"
+            f"?search={query}&limit={limit}"
+            "&expand[]=downloads&expand[]=likes&expand[]=tags&expand[]=pipeline_tag&expand[]=cardData&expand[]=siblings"
+        )
 
-        url = "https://huggingface.co/api/models"
-        params = {"search": query, "limit": limit, "full": "true"}
-
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url, params=params, headers=headers)
-                if resp.status_code == 200:
-                    items = resp.json()
-                    return [await self.normalize(item) for item in items]
-        except Exception as e:
-            logger.warning(f"HuggingFace model search failed: {e}")
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code in (429, 503) and attempt < 2:
+                        delay = 0.5 * (2 ** attempt)
+                        logger.warning(f"HuggingFace model API HTTP {resp.status_code}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    if resp.status_code == 200:
+                        items = resp.json()
+                        return [await self.normalize(item) for item in items]
+                    break
+            except Exception as e:
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    continue
+                logger.warning(f"HuggingFace model search failed: {e}")
 
         return []
 
     async def fetch(self, resource_id: str) -> Optional[Dict[str, Any]]:
+        headers = get_huggingface_headers()
         url = f"https://huggingface.co/api/models/{resource_id}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url)
+                resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     return await self.normalize(resp.json())
         except Exception as e:
@@ -98,7 +110,7 @@ class HuggingFaceModelAdapter(DataSourceAdapter):
     async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get("https://huggingface.co/api/models?limit=1")
+                resp = await client.get("https://huggingface.co/api/models?limit=1", headers=get_huggingface_headers())
                 return resp.status_code == 200
         except Exception:
             return False

@@ -37,6 +37,59 @@ export interface SemanticScholarSearchResult {
 
 const TIMEOUT_MS = 7500;
 
+export function getSemanticScholarApiKey(): string {
+    return (process.env.SEMANTIC_SCHOLAR_API_KEY || process.env.S2_API_KEY || '').trim();
+}
+
+export async function fetchSemanticScholarWithRetry(
+    endpoint: string,
+    headers: Record<string, string>,
+    timeoutMs: number = TIMEOUT_MS,
+    maxRetries: number = 2
+): Promise<Response> {
+    const baseDelayMs = 600;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(endpoint, {
+                headers,
+                signal: controller.signal,
+                next: { revalidate: 3600 },
+            });
+            clearTimeout(timeoutId);
+
+            if ((res.status === 429 || res.status === 503) && attempt < maxRetries) {
+                const retryAfterHeader = res.headers.get('retry-after');
+                const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : NaN;
+                const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+                    ? Math.min(retryAfterMs, 3000)
+                    : baseDelayMs * Math.pow(2, attempt);
+                console.warn(
+                    `[SEMANTIC_SCHOLAR] HTTP ${res.status} rate limit hit. Retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`
+                );
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+
+            return res;
+        } catch (err: any) {
+            clearTimeout(timeoutId);
+            lastError = err;
+            if (attempt < maxRetries) {
+                const delay = baseDelayMs * Math.pow(2, attempt);
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+            throw err;
+        }
+    }
+
+    throw lastError || new Error('Semantic Scholar request failed');
+}
+
 export async function searchSemanticScholar(
     query: string,
     limit: number = 8,
@@ -70,7 +123,7 @@ export async function searchSemanticScholar(
     ].join(',');
 
     const endpoint = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(cleanQuery)}&limit=${limit}&fields=${fields}`;
-    const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY;
+    const apiKey = getSemanticScholarApiKey();
 
     const headers: Record<string, string> = {
         'Accept': 'application/json',
@@ -80,17 +133,8 @@ export async function searchSemanticScholar(
         headers['x-api-key'] = apiKey;
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
     try {
-        const res = await fetch(endpoint, {
-            headers,
-            signal: controller.signal,
-            next: { revalidate: 3600 },
-        });
-
-        clearTimeout(timeoutId);
+        const res = await fetchSemanticScholarWithRetry(endpoint, headers, TIMEOUT_MS, 2);
 
         if (!res.ok) {
             const status = res.status;
@@ -120,7 +164,6 @@ export async function searchSemanticScholar(
 
         return papers;
     } catch (err: any) {
-        clearTimeout(timeoutId);
         const isAbort = err.name === 'AbortError';
         if (trace) {
             trace.semanticScholar = {

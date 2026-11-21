@@ -5,6 +5,7 @@
  */
 
 import { UnifiedCandidate, StructuredQueryUnderstanding } from '../types';
+import { getSemanticScholarApiKey, fetchSemanticScholarWithRetry } from '@/server/papers/semanticScholar';
 
 const S2_API = 'https://api.semanticscholar.org/graph/v1/paper/search';
 const FIELDS = 'paperId,title,abstract,authors,year,venue,citationCount,openAccessPdf,externalIds,url';
@@ -16,18 +17,17 @@ export async function fetchSemanticScholarPapers(
 ): Promise<UnifiedCandidate[]> {
     const candidates: UnifiedCandidate[] = [];
     const seenIds = new Set<string>();
-    const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY || process.env.S2_API_KEY;
-    const headers: Record<string, string> = {};
+    const apiKey = getSemanticScholarApiKey();
+    const headers: Record<string, string> = {
+        'Accept': 'application/json',
+        'User-Agent': 'AIDatasetExplorer/2.0 (Academic Research Assistant)',
+    };
     if (apiKey) headers['x-api-key'] = apiKey;
 
     for (const q of queries.slice(0, 3)) {
         try {
             const url = `${S2_API}?query=${encodeURIComponent(q)}&fields=${FIELDS}&limit=20`;
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 6000);
-
-            const res = await fetch(url, { headers, signal: ctrl.signal, cache: 'no-store' });
-            clearTimeout(tid);
+            const res = await fetchSemanticScholarWithRetry(url, headers, 6000, 2);
 
             if (!res.ok) continue;
 
