@@ -29,6 +29,7 @@ export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
     const models: UnifiedCandidate[] = [];
     const papers: UnifiedCandidate[] = [];
 
+    const parsedSchema = (res?.diagnostics?.parsedQuery as any) || null;
     let prof = {};
     if (fastApiRes) {
         prof = fastApiRes.problem_profile || {};
@@ -36,25 +37,55 @@ export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
             ? fastApiRes.datasets
             : fastApiRes.closest_alternatives || [];
         if (recommendedDatasets.length) {
-            datasets.push(...recommendedDatasets.map((d: any) => ({
-                ...d, type: 'dataset', url: d.url || d.canonical_url || '#', matchScore: d.score ?? 0, 
-                evidenceLevel: d.score >= 85 ? 'VERIFIED' : 'HIGH_RELEVANCE', evidenceSources: [d.source || 'huggingface'],
-                whyMatches: d.why, warnings: d.warnings, matchReason: (d.why && d.why[0]) || 'Aligned with target task and modality.',
-            })));
+            for (const d of recommendedDatasets) {
+                const candidate = {
+                    ...d, type: 'dataset' as const, url: d.url || d.canonical_url || '#', matchScore: d.score ?? 0,
+                    evidenceLevel: d.score >= 85 ? 'VERIFIED' : 'HIGH_RELEVANCE', evidenceSources: [d.source || 'huggingface'],
+                    whyMatches: d.why, warnings: d.warnings, matchReason: (d.why && d.why[0]) || 'Aligned with target task and modality.',
+                };
+                if (parsedSchema) {
+                    const v = verifyCandidate(candidate, parsedSchema);
+                    if (!v.passed) continue;
+                    const scored = scoreCandidate(candidate, parsedSchema);
+                    if (scored.matchScore >= 35) datasets.push(scored as unknown as UnifiedCandidate);
+                } else {
+                    datasets.push(candidate as unknown as UnifiedCandidate);
+                }
+            }
         }
         if (fastApiRes.models) {
-            models.push(...fastApiRes.models.map((m: any) => ({
-                ...m, type: 'model', url: m.url || m.canonical_url || '#', matchScore: m.score ?? 0, 
-                evidenceLevel: 'VERIFIED', whyMatches: m.why, warnings: m.warnings,
-                matchReason: (m.why && m.why[0]) || 'Compatible model architecture for problem.',
-            })));
+            for (const m of fastApiRes.models) {
+                const candidate = {
+                    ...m, type: 'model' as const, url: m.url || m.canonical_url || '#', matchScore: m.score ?? 0,
+                    evidenceLevel: 'VERIFIED', whyMatches: m.why, warnings: m.warnings,
+                    matchReason: (m.why && m.why[0]) || 'Compatible model architecture for problem.',
+                };
+                if (parsedSchema) {
+                    const v = verifyCandidate(candidate, parsedSchema);
+                    if (!v.passed) continue;
+                    const scored = scoreCandidate(candidate, parsedSchema);
+                    if (scored.matchScore >= 35) models.push(scored as unknown as UnifiedCandidate);
+                } else {
+                    models.push(candidate as unknown as UnifiedCandidate);
+                }
+            }
         }
         const allPapers = [...(fastApiRes.papers || []), ...(fastApiRes.latest_research || [])];
-        papers.push(...allPapers.map((p: any) => ({
-            ...p, type: 'paper', matchScore: p.score, 
-            evidenceLevel: 'PEER_REVIEWED', relationship: p.paper_type === 'DATASET_SPECIFIC' ? 'EXACT_DATASET' : p.paper_type === 'MODEL_SPECIFIC' ? 'EXACT_MODEL' : 'DIRECTLY_RELATED',
-            matchReason: (p.why && p.why[0]) || 'Scientific literature directly investigating target methodology.',
-        })));
+        for (const p of allPapers) {
+            const candidate = {
+                ...p, type: 'paper' as const, matchScore: p.score ?? 0,
+                evidenceLevel: 'PEER_REVIEWED', relationship: p.paper_type === 'DATASET_SPECIFIC' ? 'EXACT_DATASET' : p.paper_type === 'MODEL_SPECIFIC' ? 'EXACT_MODEL' : 'DIRECTLY_RELATED',
+                matchReason: (p.why && p.why[0]) || 'Scientific literature directly investigating target methodology.',
+            };
+            if (parsedSchema) {
+                const v = verifyCandidate(candidate, parsedSchema);
+                if (!v.passed) continue;
+                const scored = scoreCandidate(candidate, parsedSchema);
+                if (scored.matchScore >= 35) papers.push(scored as unknown as UnifiedCandidate);
+            } else {
+                papers.push(candidate as unknown as UnifiedCandidate);
+            }
+        }
     }
 
     if (res) {
@@ -64,70 +95,72 @@ export async function advancedSearch(rawQuery: string): Promise<SearchResult> {
         const existingPaperIds = new Set(papers.map(p => p.id));
 
         for (const d of (Array.isArray(res.datasets) ? res.datasets : [])) {
-            if (!existingDatasetIds.has(d.id)) datasets.push(d as unknown as UnifiedCandidate);
+            if (!existingDatasetIds.has(d.id)) {
+                datasets.push(d as unknown as UnifiedCandidate);
+                existingDatasetIds.add(d.id);
+            }
         }
         for (const m of (Array.isArray(res.models) ? res.models : [])) {
-            if (!existingModelIds.has(m.id)) models.push(m as unknown as UnifiedCandidate);
+            if (!existingModelIds.has(m.id)) {
+                models.push(m as unknown as UnifiedCandidate);
+                existingModelIds.add(m.id);
+            }
         }
         for (const p of (Array.isArray(res.papers) ? res.papers : [])) {
-            if (!existingPaperIds.has(p.id)) papers.push(p as unknown as UnifiedCandidate);
+            if (!existingPaperIds.has(p.id)) {
+                papers.push(p as unknown as UnifiedCandidate);
+                existingPaperIds.add(p.id);
+            }
         }
 
-        // The strict filter can reject every dataset even when the provider found
-        // useful near-matches. Keep those visible as partial alternatives.
-        if (datasets.length === 0) {
+        // Only recover partial alternatives if they are NOT contradictions and score >= 35 on real scoring
+        if (datasets.length === 0 && parsedSchema) {
             for (const rejected of (res.rejectedResults || [])) {
                 const candidate = rejected.candidate as any;
                 if (candidate?.type !== 'dataset' || !candidate.id || existingDatasetIds.has(candidate.id)) continue;
                 const isContradiction = rejected.stage === 'CONTRADICTION_VETO'
                     || rejected.stage === 'STAGE_6_CONTRADICTION'
-                    || /contradict|fatal/i.test(rejected.reason || '');
+                    || /contradict|fatal|zero anchor|conflicting/i.test(rejected.reason || '');
+                if (isContradiction) continue;
+
+                const scored = scoreCandidate(candidate, parsedSchema);
+                if (scored.matchScore < 35) continue;
+
                 datasets.push({
-                    ...candidate,
+                    ...scored,
                     type: 'dataset',
                     url: candidate.url || candidate.canonical_url || '#',
-                    matchScore: isContradiction ? 0 : Math.max(20, candidate.matchScore ?? 20),
-                    confidenceScore: isContradiction ? 0 : (candidate.confidenceScore ?? 20),
-                    tier: 'Tier D',
-                    matchCategory: isContradiction ? 'NO_MATCH' : 'PARTIAL_MATCH',
-                    matchLevel: isContradiction ? 'NO_MATCH' : 'PARTIAL_MATCH',
+                    tier: 'Tier C',
+                    matchCategory: 'PARTIAL_MATCH',
+                    matchLevel: 'PARTIAL_MATCH',
                     evidenceLevel: 'PARTIAL',
-                    rejected: true,
+                    rejected: false,
                     rejectionReason: rejected.reason,
-                    matchReason: `Closest available alternative: ${rejected.reason}`,
-                } as UnifiedCandidate);
+                    matchReason: `Partial domain/modality match: ${rejected.reason}`,
+                } as unknown as UnifiedCandidate);
                 existingDatasetIds.add(candidate.id);
                 if (datasets.length >= 5) break;
             }
         }
 
-        // Subject any fallback baseline models to the exact same verification and scoring
+        // Subject any fallback baseline models to strict verification and scoring (no matchScore: 0 noise)
         if (models.length === 0 && res.diagnostics?.parsedQuery) {
             const baselines = getFallbackBaselineModels(res.diagnostics.parsedQuery as any);
             for (const b of baselines) {
-                // Hard verification: Reject any model with dimensionality or modality contradictions
                 const verification = verifyCandidate(b, res.diagnostics.parsedQuery as any);
                 if (!verification.passed) {
-                    continue; // HARD VETO: Do not recommend incompatible 3D models for 2D queries or mismatched tasks
+                    continue;
                 }
                 const scored = scoreCandidate(b, res.diagnostics.parsedQuery as any);
-                if (scored.matchScore > 0 && !scored.matchBreakdown?.disqualifications?.length) {
+                if (scored.matchScore >= 35 && !scored.matchBreakdown?.disqualifications?.length) {
                     models.push(scored as unknown as UnifiedCandidate);
-                } else {
-                    // Display NO percentage, labeled clearly as unverified fallback suggestion
-                    const unverified = {
-                        ...b,
-                        matchScore: 0,
-                        confidenceScore: 0,
-                        tier: 'Tier D',
-                        matchCategory: 'UNVERIFIED_FALLBACK',
-                        badge: 'Unverified Fallback Suggestion',
-                        matchReason: 'Unverified fallback architecture suggestion for transfer learning.',
-                    };
-                    models.push(unverified as unknown as UnifiedCandidate);
                 }
             }
         }
+
+        datasets.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+        models.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+        papers.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
     }
 
     const exactMatches = [...datasets, ...models, ...papers].filter(c => (c as any).matchScore >= 85 || (c as any).matchCategory === 'EXACT_MATCH');

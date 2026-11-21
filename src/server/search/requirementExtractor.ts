@@ -1,13 +1,14 @@
 /** Generic requirement extraction for arbitrary AI/ML project descriptions. */
 import { Requirement, RequirementProfile, RequirementCategory } from './types';
+import { extractAnchorSubjectTerms } from './queryUnderstanding';
 
 const CATEGORY_WEIGHT: Partial<Record<RequirementCategory, number>> = {
-    DOMAIN: 0.18, MODALITY: 0.14, TASK: 0.18, TARGET: 0.14,
-    DATA_SIZE: 0.06, LABEL_AVAILABILITY: 0.07, OTHER: 0.05,
-    PRETRAINING: 0.03, COMPUTE: 0.05, TEMPORAL: 0.04, MULTIMODAL: 0.06,
+    DOMAIN: 0.18, MODALITY: 0.16, TASK: 0.18, TARGET: 0.22,
+    DATA_SIZE: 0.05, LABEL_AVAILABILITY: 0.06, OTHER: 0.04,
+    PRETRAINING: 0.03, COMPUTE: 0.04, TEMPORAL: 0.04, MULTIMODAL: 0.06,
 };
-const TASKS = /classification|classify|recognition|segmentation|segment(?:ation)?|detection|detect|localization|tracking|forecast(?:ing)?|prediction|regression|ranking|priority|retrieval|recommendation|clustering|generation|translation|summarization|summariz|question answering|speech recognition|pose estimation|anomaly detection|control|planning|reinforcement learning|named entity recognition|\bner\b/i;
-const MODALITIES = /image|photo(?:graph)?s?|video|audio|speech|voice|text|multilingual|language|tabular|csv|time[- ]series|sensor|3d|3-d|point[- ]cloud|multimodal|genomic|geospatial|satellite|multispectral|hyperspectral|ct\b|mri\b|ultrasound|eeg|lidar/i;
+const TASKS = /classification|classify|recognition|segmentation|segment(?:ation)?|detection|detect|localization|tracking|forecast(?:ing)?|prediction|regression|ranking|priority|retrieval|recommendation|clustering|generation|translation|summarization|summariz|question answering|speech recognition|pose estimation|anomaly detection|control|planning|reinforcement learning|named entity recognition|\bner\b|\brag\b/i;
+const MODALITIES = /image|photo(?:graph)?s?|video|audio|speech|voice|text|multilingual|language|notes?|documents?|tabular|csv|time[- ]series|sensor|3d|3-d|point[- ]cloud|multimodal|genomic|geospatial|satellite|multispectral|hyperspectral|thermal|infrared|microscop|histolog|dermoscop|fundus|x[- ]?ray|cxr|ct\b|cta\b|mri\b|ultrasound|eeg|ieeg|lidar|cryo[- ]?e[mt]/i;
 const STRUCTURE = /2d|3d|4d|volumetric|sequence|sequential|temporal|spatial|graph|point[- ]cloud|stream/i;
 
 function unique(values: string[]): string[] { return [...new Set(values.map(value => value.trim()).filter(Boolean))]; }
@@ -38,15 +39,49 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
     }
 
     const modalityMatches = unique(lower.match(new RegExp(MODALITIES.source, 'gi')) || []);
-    const modality = modalityMatches[0] || null;
-    if (modality) add(requirements, hardRequirementIds, softRequirementIds, 'req_modality', 'MODALITY', modality, `Input modality: ${modality}`, true, 0.82);
+    let modality = modalityMatches[0] || null;
+    if (!modality) {
+        if (/\bner\b|named\s*entity|\brag\b|clinical\s*notes|pathology\s*notes|legal|sentiment|summariz|translation/i.test(lower)) {
+            modality = 'text';
+        } else if (/fraud|credit\s*risk|churn/i.test(lower)) {
+            modality = 'tabular';
+        } else if (/solar\s*panel|plant|leaf|vehicle|traffic|skin|melanoma|retinopath|nuclei/i.test(lower)) {
+            modality = 'image';
+        }
+    }
+    if (modality) add(requirements, hardRequirementIds, softRequirementIds, 'req_modality', 'MODALITY', modality, `Input modality: ${modality}`, true, 0.88);
 
     const dimensions = unique(lower.match(/\b(?:2d|3d|4d|volumetric|point[- ]cloud|sequence|time[- ]series|graph)\b/gi) || []);
-    const object = phrase(query, /\b(?:detect|classif(?:y|ication)|segment|recognize|forecast|predict)\s+(?:the\s+)?([a-z][a-z0-9 -]{2,50}?)(?:\s+from|\s+using|\s+in|\s+on|\.|,|$)/i) || phrase(query, /\b(?:dataset|model|system)\s+for\s+([a-z][a-z0-9 -]{2,50}?)(?:\s+from|\s+using|\s+with|\.|,|$)/i);
-    if (object) add(requirements, hardRequirementIds, softRequirementIds, 'req_object', 'TARGET', object, `Target object/entity: ${object}`, true, 0.78);
+
+    // Always extract anchor subject terms (handles both noun-first and verb-first problem statements)
+    const { anchorTerms, coreSubjectPhrase } = extractAnchorSubjectTerms(query);
+    const phraseObject =
+        phrase(query, /\b(?:detect|classif(?:y|ication)|segment|recognize|forecast|predict)\s+(?:the\s+)?([a-z][a-z0-9 -]{2,50}?)(?:\s+from|\s+using|\s+in|\s+on|\.|,|$)/i) ||
+        phrase(query, /\b(?:dataset|model|system)\s+for\s+([a-z][a-z0-9 -]{2,50}?)(?:\s+from|\s+using|\s+with|\.|,|$)/i);
+
+    const targetValue = anchorTerms.length > 0
+        ? anchorTerms.join('; ')
+        : phraseObject;
+
+    if (targetValue) {
+        add(
+            requirements,
+            hardRequirementIds,
+            softRequirementIds,
+            'req_object',
+            'TARGET',
+            targetValue,
+            `Target subject/entity: ${coreSubjectPhrase || targetValue}`,
+            true,
+            0.90,
+            'explicit'
+        );
+    }
 
     const domain = phrase(query, /\b(?:in|within|for)\s+(?:the\s+)?([a-z][a-z0-9 &/-]{2,40}?)(?:\s+domain|\s+data|\s+datasets?|\s+projects?|\s+applications?|\.|,|$)/i);
-    if (domain && !TASKS.test(domain) && !MODALITIES.test(domain)) add(requirements, hardRequirementIds, softRequirementIds, 'req_domain', 'DOMAIN', domain, `Project domain: ${domain}`, false, 0.62);
+    if (domain && !TASKS.test(domain) && !MODALITIES.test(domain)) {
+        add(requirements, hardRequirementIds, softRequirementIds, 'req_domain', 'DOMAIN', domain, `Project domain: ${domain}`, false, 0.72);
+    }
 
     const labelsRequired = /labeled|labelled|annotated|ground truth|class labels?|supervised/i.test(lower);
     if (labelsRequired) add(requirements, hardRequirementIds, softRequirementIds, 'req_labels', 'LABEL_AVAILABILITY', 'labeled/annotated', 'Labels or annotations are required', true, 0.94, 'explicit');
@@ -72,7 +107,7 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
         add(requirements, hardRequirementIds, softRequirementIds, 'req_longitudinal', 'LONGITUDINAL', 'longitudinal', 'Longitudinal multi-timepoint data structure required', true, 0.95, 'explicit');
     }
     const isMultimodal = /multimodal|multi[- ]modal|multiple modalities/i.test(lower);
-    const hasClinicalData = /clinical|patient|ehr|electronic health|medical record|clinical variable|progression label/i.test(lower);
+    const hasClinicalData = /clinical\s*(?:data|cohort|records?|patients?|variables?)|real[- ]patient|ehr\b|electronic health|medical record|progression label/i.test(lower);
     if (hasClinicalData) {
         add(requirements, hardRequirementIds, softRequirementIds, 'req_clinical', 'CLINICAL', 'patient clinical data', 'Patient clinical cohort data required', true, 0.90, 'explicit');
     }
@@ -86,14 +121,15 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
     const wantsModel = /model|architecture|network|backbone/i.test(lower);
     const wantsDataset = /dataset|data|training set/i.test(lower);
     const queryType = wantsDataset && wantsModel ? 'all' : wantsModel ? 'model' : wantsDataset ? 'dataset' : 'all';
+    const resolvedObject = coreSubjectPhrase || phraseObject || null;
     return {
         requirements, hardRequirementIds, softRequirementIds, gpuVramLimitGb: gpu,
         isLongitudinal, isMultimodal, hasClinicalData, hasClassImbalance, hasMissingData,
-        primaryDomainKeywords: domain ? [domain] : [], queryType,
-        domain: domain || null, subdomain: null, object: object || null,
+        primaryDomainKeywords: anchorTerms.length > 0 ? anchorTerms : (domain ? [domain] : []), queryType,
+        domain: domain || coreSubjectPhrase || null, subdomain: null, object: resolvedObject,
         input: { type: modality || null, modality, dimensions: dimensions.join(', ') || null, structure: STRUCTURE.test(lower) ? dimensions.join(', ') : null },
         output: { type: task || null, labels: labelsRequired ? ['labeled'] : [], classes: [] },
-        entities: unique([...(object ? [object] : []), ...modalityMatches]), preferences, negativeRequirements,
+        entities: unique([...anchorTerms, ...(resolvedObject ? [resolvedObject] : []), ...modalityMatches]), preferences, negativeRequirements,
         datasetRequirements: { minimumSize: minSize, maximumSize: null, annotationRequired: labelsRequired || null, labelRequired: labelsRequired || null, license: licenseMatches, source: sourceMatches, publicAccess: publicAccess || null },
         researchRequirements: { year, venue: [], datasetSpecific: /papers?\s+(?:using|about)|dataset[- ]specific/i.test(lower) ? true : null },
     };

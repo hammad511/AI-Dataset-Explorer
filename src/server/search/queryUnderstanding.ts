@@ -65,6 +65,21 @@ const DOMAIN_RULES: DomainMatchRule[] = [
         test: (q) => /melanoma|skin\s*(lesion|cancer|disease|tumor|condition)|isic|dermoscop|dermatolog/i.test(q),
     },
     {
+        domain: 'Clinical & Biomedical Natural Language Processing',
+        subdomains: ['Clinical NER', 'Pathology Note Extraction', 'Biomedical Text Mining', 'EHR NLP'],
+        test: (q) => /(?:clinical|pathology|medical|biomedical|ehr|radiology|patient|doctor|hospital|oncology).*(?:\bner\b|named\s*entity|notes?|text|reports?|nlp|token\s*classification|entity\s*extraction)/i.test(q) || (/\bner\b|named\s*entity/i.test(q) && /clinical|pathology|medical|biomedical|ehr|disease|drug/i.test(q)),
+    },
+    {
+        domain: 'Legal, Financial & Enterprise RAG / NLP',
+        subdomains: ['Legal Document Analysis', 'Retrieval-Augmented Generation (RAG)', 'Multilingual Document Retrieval'],
+        test: (q) => /\blegal\b|\bcontract\b|\blaw\b|\blegislation\b|\brag\b|retrieval[- ]augmented/i.test(q),
+    },
+    {
+        domain: 'Renewable Energy & Thermal Solar Inspection',
+        subdomains: ['Solar Panel Defect Detection', 'Photovoltaic Thermal Inspection', 'Electroluminescence Anomaly Detection'],
+        test: (q) => /solar\s*panel|photovoltaic|\bpv\s*(?:panel|module|defect)|electroluminescen/i.test(q),
+    },
+    {
         domain: 'Biomedical / Cellular Biology & Digital Pathology',
         subdomains: ['Nuclei Segmentation', 'Fluorescence Microscopy', 'Histopathology'],
         test: (q) => /nuclei|cellular|fluorescence|histolog|monuseg|stardist/i.test(q),
@@ -72,7 +87,7 @@ const DOMAIN_RULES: DomainMatchRule[] = [
     {
         domain: 'Biomedical / Neurology & Neuroimaging',
         subdomains: ['Brain MRI', 'Neuroimaging', 'Neuro-oncology', 'Brain Tumor'],
-        test: (q) => /brain|cerebr|hippocamp|glioma|stroke|epilep|eeg|ieeg|ecog|cranial|neuro/i.test(q),
+        test: (q) => /\bbrain\b|cerebr|hippocamp|glioma|\bstroke\b|epilep|\beeg\b|\bieeg\b|\becog\b|cranial|\bneuro(?:imaging|logy|oncology)?\b/i.test(q),
     },
     {
         domain: 'Biomedical / Abdominal Imaging & Oncology',
@@ -134,7 +149,140 @@ const DOMAIN_RULES: DomainMatchRule[] = [
         subdomains: ['Anomaly Detection', 'Tabular Forecasting', 'Credit Fraud'],
         test: (q) => /fraud|credit\s*card|banking|financial|stock|forecasting/i.test(q),
     },
+    {
+        domain: 'Clinical & Biomedical Natural Language Processing',
+        subdomains: ['Clinical NER', 'Pathology Note Extraction', 'Biomedical Text Mining', 'EHR NLP'],
+        test: (q) => /(?:clinical|pathology|medical|biomedical|ehr|radiology|patient|doctor|hospital| oncology)\s*(?:ner\b|notes?|text|reports?|nlp|extraction|summariz|classification)/i.test(q) || (/\bner\b|named\s*entity/i.test(q) && /clinical|pathology|medical|biomedical|ehr|disease|drug/i.test(q)),
+    },
+    {
+        domain: 'Legal, Financial & Enterprise RAG / NLP',
+        subdomains: ['Legal Document Analysis', 'Retrieval-Augmented Generation (RAG)', 'Multilingual Document Retrieval'],
+        test: (q) => /\blegal\b|\bcontract\b|\blaw\b|\blegislation\b|\brag\b|retrieval[- ]augmented/i.test(q),
+    },
+    {
+        domain: 'Renewable Energy & Thermal Solar Inspection',
+        subdomains: ['Solar Panel Defect Detection', 'Photovoltaic Thermal Inspection', 'Electroluminescence Anomaly Detection'],
+        test: (q) => /solar\s*panel|photovoltaic|\bpv\s*(?:panel|module|defect)|electroluminescen/i.test(q),
+    },
 ];
+
+// ── Core Subject & Anchor-Token Extraction ───────────────────────────────────
+
+const GENERIC_ML_STOPWORDS = new Set([
+    'a', 'an', 'the', 'and', 'or', 'for', 'to', 'in', 'on', 'of', 'with', 'from', 'by', 'at', 'as', 'into', 'over', 'under',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'can', 'could',
+    'i', 'im', 'we', 'our', 'my', 'me', 'you', 'your', 'want', 'need', 'looking', 'search', 'find', 'build', 'building', 'create', 'creating',
+    'make', 'making', 'develop', 'developing', 'train', 'training', 'fine', 'tune', 'tuning', 'finetune', 'finetuning', 'use', 'using', 'based',
+    'dataset', 'datasets', 'data', 'database', 'corpus', 'corpora', 'collection', 'benchmark', 'benchmarks', 'challenge',
+    'model', 'models', 'architecture', 'architectures', 'network', 'networks', 'backbone', 'backbones', 'checkpoint', 'weights', 'pretrained',
+    'system', 'pipeline', 'project', 'application', 'solution', 'tool', 'framework', 'method', 'approach', 'algorithm',
+    'ai', 'ml', 'dl', 'deep', 'learning', 'machine', 'neural', 'artificial', 'intelligence', 'automated', 'automatic',
+    'classification', 'classify', 'classifier', 'segmentation', 'segment', 'segmenter', 'detection', 'detect', 'detector',
+    'recognition', 'recognize', 'prediction', 'predict', 'predictor', 'estimation', 'estimate', 'regression', 'clustering',
+    'generation', 'generate', 'identification', 'identify', 'analysis', 'analyze', 'monitoring', 'monitor', 'assessment',
+    'image', 'images', 'imaging', 'photo', 'photos', 'photograph', 'photographs', 'picture', 'pictures', 'visual', 'vision',
+    'video', 'videos', 'stream', 'streams', 'frame', 'frames', 'text', 'texts', 'tabular', 'table', 'csv', 'file', 'files',
+    'real', 'time', 'realtime', 'near', 'fast', 'high', 'low', 'accuracy', 'accurate', 'precision', 'latency', 'speed', 'performance',
+    'lightweight', 'small', 'large', 'scale', 'open', 'source', 'public', 'available', 'free', 'commercial', 'safe', 'license',
+    'gpu', 'vram', 'memory', 'hardware', 'cuda', '2d', '3d', '4d', 'rgb', 'planar', 'volumetric',
+    'level', 'multi', 'single', 'task', 'domain', 'type', 'input', 'output', 'target', 'label', 'labels', 'labeled', 'annotated',
+]);
+
+export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
+    solar: ['solar', 'photovoltaic', 'pv', 'elpv', 'solar-panel', 'solar_panel', 'module'],
+    panel: ['panel', 'photovoltaic', 'pv', 'solar', 'surface', 'module'],
+    defect: ['defect', 'anomaly', 'crack', 'fault', 'damage', 'corrosion', 'inspection', 'mvtec', 'surface-defect'],
+    thermal: ['thermal', 'infrared', 'ir', 'thermography', 'flir'],
+    pathology: ['pathology', 'histopathology', 'clinical', 'medical', 'biomedical', 'biomed', 'ehr', 'oncology', 'disease', 'bc5cdr', 'ncbi-disease', 'pubmed'],
+    clinical: ['clinical', 'medical', 'biomedical', 'patient', 'healthcare', 'ehr', 'hospital', 'pathology', 'pubmed', 'mimic', 'biobert'],
+    ner: ['ner', 'named-entity', 'named entity', 'token-classification', 'entity-extraction', 'entity recognition', 'bc5cdr', 'conll', 'i2b2'],
+    notes: ['notes', 'clinical-notes', 'ehr', 'text', 'reports', 'medical-text', 'discharge', 'abstracts'],
+    legal: ['legal', 'law', 'contract', 'contracts', 'legislation', 'court', 'statute', 'judicial', 'lexglue', 'eurlex', 'cuad', 'case-law'],
+    rag: ['rag', 'retrieval', 'question-answering', 'qa', 'passage', 'embedding', 'document-retrieval', 'knowledge-intensive', 'bge'],
+    multilingual: ['multilingual', 'cross-lingual', 'multi-language', 'xlm', 'mbert', 'translation'],
+    plant: ['plant', 'leaf', 'leaves', 'crop', 'agriculture', 'agricultural', 'plantvillage', 'plantdoc', 'foliar', 'botanical'],
+    leaf: ['leaf', 'leaves', 'plant', 'crop', 'plantvillage', 'foliar', 'blight', 'rust', 'mildew'],
+    fraud: ['fraud', 'fraudulent', 'credit-card', 'transaction', 'financial', 'banking', 'payment', 'anomaly', 'ieee-cis'],
+    alzheimer: ['alzheimer', 'alzheimers', 'dementia', 'mci', 'adni', 'oasis', 'cognitive', 'neurodegenerative', 'brain'],
+    cardiac: ['cardiac', 'heart', 'coronary', 'myocardium', 'myocardial', 'aorta', 'aortic', 'cardiovascular', 'acdc', 'asoca', 'ventricle'],
+    coronary: ['coronary', 'cardiac', 'heart', 'vessel', 'artery', 'arteries', 'cta', 'ccta', 'asoca', 'stenosis'],
+    abdomen: ['abdomen', 'abdominal', 'liver', 'kidney', 'pancreas', 'spleen', 'amos', 'btcv', 'chaos', 'flare', 'multi-organ'],
+    abdominal: ['abdominal', 'abdomen', 'liver', 'kidney', 'pancreas', 'spleen', 'amos', 'btcv', 'chaos', 'flare'],
+    brain: ['brain', 'cerebral', 'neuro', 'glioma', 'glioblastoma', 'brats', 'intracranial', 'cranial', 'hippocampus', 'meningioma'],
+    glioma: ['glioma', 'glioblastoma', 'brain-tumor', 'brain tumor', 'brats', 'lgg', 'hgg', 'neuro-oncology'],
+    retina: ['retina', 'retinal', 'retinopathy', 'fundus', 'eyepacs', 'aptos', 'messidor', 'ophthalmology', 'diabetic-retinopathy'],
+    retinopathy: ['retinopathy', 'retina', 'retinal', 'fundus', 'eyepacs', 'aptos', 'messidor', 'diabetic'],
+    skin: ['skin', 'melanoma', 'dermoscopy', 'dermoscopic', 'isic', 'ham10000', 'dermatology', 'lesion', 'nevus'],
+    melanoma: ['melanoma', 'skin-lesion', 'skin cancer', 'isic', 'ham10000', 'dermoscopy', 'dermatology'],
+    chest: ['chest', 'thoracic', 'pulmonary', 'lung', 'pneumonia', 'cxr', 'chexpert', 'mimic-cxr', 'radiograph'],
+    pneumonia: ['pneumonia', 'chest-xray', 'cxr', 'pulmonary', 'lung', 'chexpert', 'thoracic'],
+    nuclei: ['nuclei', 'nuclear', 'cell', 'cellular', 'monuseg', 'pannuke', 'stardist', 'cellpose', 'histology', 'microscopy'],
+    emotion: ['emotion', 'emotional', 'affect', 'affective', 'ravdess', 'iemocap', 'tess', 'crema-d', 'sentiment'],
+    driver: ['driver', 'driving', 'drowsiness', 'drowsy', 'fatigue', 'yawdd', 'nthu', 'in-cabin'],
+    vehicle: ['vehicle', 'vehicles', 'traffic', 'car', 'cars', 'automotive', 'bdd100k', 'kitti', 'nuscenes', 'highway'],
+    seizure: ['seizure', 'epilepsy', 'epileptic', 'eeg', 'ieeg', 'chb-mit', 'tusz', 'electroencephalogram'],
+    satellite: ['satellite', 'remote-sensing', 'aerial', 'earth-observation', 'sentinel', 'landsat', 'dota', 'bigearthnet', 'eurosat'],
+    cryo: ['cryo', 'cryo-et', 'cryo-em', 'subtomogram', 'tomogram', 'electron-tomography', 'macromolecule'],
+};
+
+/**
+ * Extracts high-specificity subject/domain anchor tokens from any natural-language problem statement,
+ * stripping conversational filler, hardware numbers, and generic ML meta-words.
+ */
+export function extractAnchorSubjectTerms(rawQuery: string): {
+    anchorTerms: string[];
+    expandedAnchorGroups: string[][];
+    coreSubjectPhrase: string;
+} {
+    const cleaned = rawQuery
+        .toLowerCase()
+        .replace(/\b\d+\s*(?:gb|g|tb|mb)\b/gi, ' ')
+        .replace(/\b(?:rtx|gtx|a100|a10g|v100|t4|h100)\s*\d*\b/gi, ' ')
+        .replace(/\b(?:mit|apache(?:\s*2\.0)?|bsd|cc-by|cc0)\b/gi, ' ')
+        .replace(/[^a-z0-9\s-]/g, ' ');
+
+    const rawTokens = cleaned.split(/\s+/).filter(Boolean);
+    const anchorTerms: string[] = [];
+
+    for (const tok of rawTokens) {
+        const bare = tok.replace(/^-+|-+$/g, '');
+        if (bare.length < 2) continue;
+        if (/^\d+$/.test(bare)) continue;
+
+        // Keep domain acronyms like "ner", "rag", "eeg", "ecg", "ct", "mri", "oct", "sar", "pv", "asr"
+        const isImportantAcronym = /^(?:ner|rag|eeg|ecg|ekg|ieeg|cta|ccta|cxr|oct|sar|pv|asr|ehr|mci|adni|isic|brats|amos|coco|yolo)$/i.test(bare);
+        if (!isImportantAcronym && (bare.length <= 2 || GENERIC_ML_STOPWORDS.has(bare))) {
+            continue;
+        }
+
+        // If hyphenated (e.g. "real-time", "multi-organ"), check sub-parts
+        if (bare.includes('-')) {
+            const parts = bare.split('-').filter(p => p.length >= 2 && !GENERIC_ML_STOPWORDS.has(p));
+            for (const p of parts) {
+                if (!anchorTerms.includes(p)) anchorTerms.push(p);
+            }
+            continue;
+        }
+
+        if (!anchorTerms.includes(bare)) {
+            anchorTerms.push(bare);
+        }
+    }
+
+    // Build synonym groups for each extracted anchor term
+    const expandedAnchorGroups: string[][] = anchorTerms.map((term) => {
+        const syns = DOMAIN_ANCHOR_SYNONYMS[term] || [];
+        return Array.from(new Set([term, ...syns]));
+    });
+
+    const coreSubjectPhrase = anchorTerms.slice(0, 4).join(' ');
+
+    return {
+        anchorTerms,
+        expandedAnchorGroups,
+        coreSubjectPhrase,
+    };
+}
 
 // â”€â”€ Master Query Parser (Section 4 & 5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -199,9 +347,9 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
         modalitySubtypes.push('DCE-MRI', 'Dynamic contrast enhanced MRI');
     }
 
-    if (/cta|coronary\s*cta|ct\b|computed\s*tomography/i.test(qLower) && !/pc.?mri/i.test(qLower)) {
+    if (/\bcta\b|coronary\s*cta|\bct\b|computed\s*tomography/i.test(qLower) && !/pc.?mri/i.test(qLower)) {
         modalities.push('CT');
-        if (/cta/i.test(qLower)) modalitySubtypes.push('CTA', 'Computed Tomography Angiography');
+        if (/\bcta\b/i.test(qLower)) modalitySubtypes.push('CTA', 'Computed Tomography Angiography');
     }
 
     if (/x.?ray|radiograph|cxr/i.test(qLower)) {
@@ -231,10 +379,13 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
     if (/2d\s*rgb|\brgb\b/i.test(qLower)) {
         modalities.push('2D RGB');
     }
-    if (/text|multilingual|\bnlp\b|language|sentences?|documents?|tickets?/i.test(qLower)) {
+    if (/text|multilingual|\bnlp\b|language|sentences?|documents?|tickets?|\bner\b|named\s*entity|notes?|\brag\b|\bcontract\b|\blegal\b/i.test(qLower)) {
         modalities.push('Text / Multilingual');
     }
-    if (/retin|fundus|photo|dermoscop|image|camera|picture|cats?\s*and\s*dogs|vehicle/i.test(qLower) && !modalities.includes('Microscopy') && !modalities.includes('Image') && !modalities.includes('MRI') && !modalities.includes('CT') && !modalities.includes('X-ray') && !modalities.includes('2D RGB') && !modalities.includes('Satellite / Multispectral')) {
+    if (/thermal|infrared|electroluminescen/i.test(qLower)) {
+        modalities.push('Image / Thermal');
+    }
+    if (/retin|fundus|photo|dermoscop|image|camera|picture|cats?\s*and\s*dogs|vehicle|solar\s*panel|plant|leaf|leaves|defect|surface/i.test(qLower) && !modalities.includes('Microscopy') && !modalities.includes('Image') && !modalities.includes('Image / Thermal') && !modalities.includes('MRI') && !modalities.includes('CT') && !modalities.includes('X-ray') && !modalities.includes('2D RGB') && !modalities.includes('Satellite / Multispectral')) {
         modalities.push('Image');
     }
     if (/audio|speech|voice|wav|acoustic/i.test(qLower)) {
@@ -297,14 +448,17 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
     } else if (/segment/i.test(qLower)) {
         predictionTasks.push('Segmentation');
     }
-    if (/object\s*detection|detect|bounding\s*box|yolo/i.test(qLower)) {
+    if (/object\s*detection|bounding\s*box|yolo/i.test(qLower) || (/\bdetect/i.test(qLower) && !/fraud|anomaly|seizure|arrhythmia|pneumonia|disease|cancer|alzheimer|tabular/i.test(qLower))) {
         predictionTasks.push('Object Detection');
     }
-    if (/classif|diagnos|early\s*detection|disease\s*detection/i.test(qLower)) {
+    if (/classif|diagnos|early\s*detection|disease\s*detection|emotion\s*recognition|speech\s*emotion/i.test(qLower)) {
         predictionTasks.push('Classification');
     }
-    if (/named\s*entity\s*recognition|\bner\b/i.test(qLower)) {
+    if (/named\s*entity\s*recognition|\bner\b|token\s*classification|entity\s*extraction/i.test(qLower)) {
         predictionTasks.push('Named Entity Recognition (NER)');
+    }
+    if (/\brag\b|retrieval|document\s*retrieval|question\s*answering|\bqa\b/i.test(qLower)) {
+        predictionTasks.push('Information Retrieval / RAG');
     }
     if (/summariz/i.test(qLower)) {
         predictionTasks.push('Summarization');
@@ -316,19 +470,20 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
         predictionTasks.push('Anomaly Detection', 'Imbalanced Classification');
     }
 
-    // 6. Generic Target Entities & Outputs
+    // 6. Generic Target Entities & Outputs (Clean Anchor Subject Extraction)
     const physiologicalTargets: string[] = [];
     const targetEntities: string[] = [];
     const targetOutputs: string[] = [];
 
-    // Domain-agnostic entity extraction: parse the core problem clauses
-    const clauses = q.split(/[/+(),-]/).map(s => s.trim()).filter(s => s.length > 2 && !/^\d+\s*gb$/i.test(s));
-    for (const clause of clauses) {
-        if (!/classification|segmentation|detection|regression|summarization|ner|priority|3d|2d|4d|rgb/i.test(clause)) {
-            targetEntities.push(clause);
+    const { anchorTerms, coreSubjectPhrase } = extractAnchorSubjectTerms(q);
+    if (coreSubjectPhrase) {
+        targetEntities.push(coreSubjectPhrase);
+    }
+    for (const term of anchorTerms) {
+        if (!targetEntities.includes(term)) {
+            targetEntities.push(term);
         }
     }
-
 
     // 7. Temporal & Dimensionality Constraints
     const isExplicit3D = /\b(?:3d|3-d|volumetric|voxel|ct\b|mri\b|cbct|nifti|\.nii)\b/i.test(qLower);
@@ -374,6 +529,7 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
 
     // 10. Synonyms & Concept Graph Expansion
     const synonyms: Record<string, string[]> = {
+        ...DOMAIN_ANCHOR_SYNONYMS,
         '4D Flow MRI': ['4D phase-contrast MRI', '4D PC-MRI', 'phase-contrast velocity MRI', '4D flow MR'],
         'sparse k-space': ['radial undersampling', 'accelerated MRI', 'sub-Nyquist sampling', 'compressed sensing'],
         'velocity field': ['3D velocity vectors', 'blood flow velocity', 'velocity encoding', 'vector field'],
@@ -421,20 +577,39 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
         modelQueries.push('StarDist nuclei segmentation', 'cellpose microscopy', 'U-Net nuclei segmentation');
         paperQueries.push('star convex nuclei segmentation fluorescence microscopy', 'few shot nuclei segmentation deep learning');
         benchmarkQueries.push('MoNuSeg challenge', 'CoNSeP benchmark');
-    } else if (primaryDomain === 'Agriculture & Plant Pathology') {
-        datasetQueries.push('plant disease classification dataset', 'crop leaf disease images', 'plantvillage dataset');
-        modelQueries.push('plant disease classification model', 'resnet50 plant disease');
-        paperQueries.push('deep learning crop disease classification', 'plant pathology image classification');
-        benchmarkQueries.push('PlantVillage', 'Plant Pathology Challenge');
+    } else if (/crop|plant|leaf|leaves|plantvillage/i.test(qLower)) {
+        datasetQueries.push('plant leaf disease dataset', 'crop disease classification', 'PlantVillage');
+        modelQueries.push('plant disease classification', 'leaf disease ViT');
+        paperQueries.push('deep learning plant leaf disease classification', 'plant pathology image classification');
+        benchmarkQueries.push('PlantVillage', 'PlantDoc');
+    } else if (/(?:clinical|pathology|medical|biomedical)\s*(?:ner\b|notes?|text|nlp)|(?:\bner\b.*(?:clinical|pathology|medical))/i.test(qLower)) {
+        datasetQueries.push('clinical NER', 'biomedical NER dataset', 'BC5CDR', 'NCBI disease');
+        modelQueries.push('biomedical NER', 'PubMedBERT', 'BioBERT NER', 'clinical NER');
+        paperQueries.push('clinical named entity recognition pathology notes', 'BioBERT biomedical text mining');
+        benchmarkQueries.push('BC5CDR', 'BLURB biomedical NLP');
+    } else if (/solar\s*panel|photovoltaic|\bpv\b.*defect/i.test(qLower)) {
+        datasetQueries.push('solar panel defect', 'photovoltaic defect dataset', 'ELPV solar', 'thermal solar panel');
+        modelQueries.push('solar panel defect detection', 'yolov8 defect detection', 'surface anomaly detection');
+        paperQueries.push('solar panel defect detection thermal electroluminescence deep learning');
+        benchmarkQueries.push('ELPV solar benchmark', 'MVTec anomaly detection');
+    } else if (/\blegal\b.*\brag\b|\blegal\b.*(?:nlp|multilingual|retrieval|document)/i.test(qLower)) {
+        datasetQueries.push('legal NLP', 'LexGLUE', 'MultiEURLEX', 'legal contract dataset');
+        modelQueries.push('legal-bert', 'bge-m3', 'multilingual embedding');
+        paperQueries.push('multilingual legal retrieval augmented generation NLP', 'LexGLUE legal language understanding');
+        benchmarkQueries.push('LexGLUE', 'MultiEURLEX');
     } else {
         const primaryAnatomy = anatomy.find(a => !a.includes('_') && a !== a.toUpperCase()) || anatomy[1] || anatomy[0];
-        const primaryTarget = targetEntities[0] || primaryAnatomy || (q.split(/[,\.]/)[0] || q).split(' ').slice(0, 4).join(' ');
-        const primaryMod = modalities[0] && modalities[0] !== 'Multimodal / General' ? modalities[0] : '';
+        const primaryTarget = coreSubjectPhrase || primaryAnatomy || anchorTerms.slice(0, 3).join(' ') || q.split(/\s+/).slice(0, 3).join(' ');
+        const primaryMod = modalities[0] && modalities[0] !== 'Multimodal / General' && modalities[0] !== 'Image' ? modalities[0] : '';
         const primaryTsk = (reconstructionTasks[0] || predictionTasks[0] || estimationTasks[0] || '').split(' ')[0];
-        datasetQueries.push(`${primaryTarget} ${primaryMod} ${primaryTsk}`.trim(), `${primaryTarget} ${primaryMod}`.trim(), `${primaryTarget} dataset`.trim());
-        modelQueries.push(`${primaryTarget} ${primaryTsk} model`.trim(), `${primaryTarget} model`.trim());
-        paperQueries.push(`${primaryTarget} deep learning`.trim(), `${primaryTarget} ${primaryTsk}`.trim());
-        benchmarkQueries.push(`${primaryTarget} benchmark`.trim(), `${primaryTarget} challenge`.trim());
+        datasetQueries.push(
+            `${primaryTarget} ${primaryTsk}`.trim(),
+            `${primaryTarget} ${primaryMod}`.trim(),
+            primaryTarget.trim()
+        );
+        modelQueries.push(`${primaryTarget} ${primaryTsk}`.trim(), primaryTarget.trim());
+        paperQueries.push(`${primaryTarget} ${primaryTsk} deep learning`.trim(), `${primaryTarget} machine learning`.trim());
+        benchmarkQueries.push(`${primaryTarget} benchmark`.trim());
     }
 
     const ontologyTerms: string[] = [];

@@ -13,6 +13,7 @@
 
 import { StructuredQueryUnderstanding, ResearchQuerySchema } from './types';
 import { SCIENTIFIC_CONCEPT_GRAPH } from './ontology';
+import { extractAnchorSubjectTerms } from './queryUnderstanding';
 
 export interface TieredQuery {
     query: string;
@@ -327,98 +328,178 @@ export function expandQueries(
         addQuery('MPII human pose dataset', 2, 'dataset');
         addQuery('keypoint detection pose estimation', 3, 'dataset');
 
+    } else if (/(?:clinical|pathology|medical|biomedical|oncology|ehr)\s*(?:ner\b|notes?|text|nlp|named\s*entity)|(?:\bner\b|named\s*entity).*(?:clinical|pathology|medical|biomedical|disease)/i.test(qLower)) {
+        // ── Clinical & Pathology NER / Biomedical NLP ─────────────────────────────
+        addQuery('clinical NER', 1, 'dataset');
+        addQuery('biomedical NER', 1, 'dataset');
+        addQuery('BC5CDR', 1, 'dataset');
+        addQuery('NCBI disease', 1, 'dataset');
+        addQuery('pathology clinical notes NER', 2, 'dataset');
+        addQuery('biomedical ner', 1, 'model');
+        addQuery('PubMedBERT', 1, 'model');
+        addQuery('BioBERT NER', 1, 'model');
+        addQuery('clinical token classification', 2, 'model');
+        addQuery('clinical named entity recognition pathology notes', 1, 'paper');
+        addQuery('biomedical named entity recognition transformer BioBERT', 1, 'paper');
+        addQuery('BC5CDR BLURB biomedical NLP benchmark', 1, 'benchmark');
+
+    } else if (/solar\s*panel|photovoltaic|\bpv\s*(?:panel|module|defect)|electroluminescen|surface\s*defect|industrial\s*defect/i.test(qLower)) {
+        // ── Solar Panel / Industrial Surface Defect Detection ─────────────────────
+        const isSolar = /solar|photovoltaic|\bpv\b|electroluminescen/i.test(qLower);
+        if (isSolar) {
+            addQuery('solar panel defect', 1, 'dataset');
+            addQuery('photovoltaic defect', 1, 'dataset');
+            addQuery('ELPV solar', 1, 'dataset');
+            addQuery('thermal solar panel', 2, 'dataset');
+            addQuery('solar panel detection', 1, 'model');
+            addQuery('yolov8 defect detection', 1, 'model');
+            addQuery('solar panel defect detection thermal deep learning', 1, 'paper');
+            addQuery('photovoltaic module defect detection electroluminescence', 1, 'paper');
+            addQuery('ELPV solar benchmark', 1, 'benchmark');
+        } else {
+            addQuery('surface defect detection', 1, 'dataset');
+            addQuery('MVTec anomaly detection', 1, 'dataset');
+            addQuery('NEU surface defect', 1, 'dataset');
+            addQuery('defect detection yolo', 1, 'model');
+            addQuery('industrial surface defect detection deep learning', 1, 'paper');
+            addQuery('MVTec AD benchmark', 1, 'benchmark');
+        }
+
+    } else if (/\blegal\b|\bcontract\b|\blegislation\b|\blexglue\b|\beurlex\b/i.test(qLower)) {
+        // ── Multilingual Legal RAG & Legal NLP ────────────────────────────────────
+        addQuery('LexGLUE', 1, 'dataset');
+        addQuery('MultiEURLEX', 1, 'dataset');
+        addQuery('legal NLP', 1, 'dataset');
+        addQuery('CUAD legal contract', 2, 'dataset');
+        addQuery('legal-bert', 1, 'model');
+        addQuery('bge-m3', 1, 'model');
+        addQuery('multilingual legal', 2, 'model');
+        addQuery('multilingual legal retrieval augmented generation NLP', 1, 'paper');
+        addQuery('LexGLUE benchmark legal language understanding', 1, 'paper');
+        addQuery('LexGLUE', 1, 'benchmark');
+
+    } else if (/crop|plant\s*(?:leaf|disease|pathology)|leaf\s*disease|plantvillage/i.test(qLower)) {
+        // ── Agriculture & Plant Leaf Disease ──────────────────────────────────────
+        addQuery('PlantVillage', 1, 'dataset');
+        addQuery('plant leaf disease', 1, 'dataset');
+        addQuery('crop disease classification', 2, 'dataset');
+        addQuery('plant disease classification', 1, 'model');
+        addQuery('leaf disease ViT', 1, 'model');
+        addQuery('plant leaf disease classification deep learning', 1, 'paper');
+        addQuery('PlantVillage benchmark', 1, 'benchmark');
+
+    } else if (/chest\s*x.?ray|\bcxr\b|pneumonia|chexpert|mimic.?cxr|lung\s*nodule/i.test(qLower)) {
+        // ── Chest X-Ray & Pulmonary Imaging ───────────────────────────────────────
+        addQuery('chest xray pneumonia', 1, 'dataset');
+        addQuery('NIH Chest X-ray', 1, 'dataset');
+        addQuery('CheXpert', 1, 'dataset');
+        addQuery('chest xray classification', 1, 'model');
+        addQuery('densenet121 chest xray', 1, 'model');
+        addQuery('chest x-ray pneumonia classification deep learning', 1, 'paper');
+        addQuery('CheXpert chest radiograph benchmark', 1, 'benchmark');
+
+    } else if (/brain\s*tumor|glioma|glioblastoma|\bbrats\b|meningioma/i.test(qLower)) {
+        // ── Brain Tumor / Glioma 3D MRI Segmentation ──────────────────────────────
+        addQuery('BraTS brain tumor MRI', 1, 'dataset');
+        addQuery('glioma brain MRI segmentation', 1, 'dataset');
+        addQuery('brain tumor MRI', 2, 'dataset');
+        addQuery('swin unetr brain tumor', 1, 'model');
+        addQuery('3D UNet brain MRI', 1, 'model');
+        addQuery('BraTS brain tumor glioma segmentation 3D MRI', 1, 'paper');
+        addQuery('BraTS challenge', 1, 'benchmark');
+
+    } else if (/abdomen|abdominal|multi.?organ.*(?:mri|ct|segment)|liver\s*tumor/i.test(qLower)) {
+        // ── Abdominal Multi-Organ MRI / CT Segmentation ───────────────────────────
+        addQuery('AMOS abdominal multi-organ', 1, 'dataset');
+        addQuery('CHAOS abdominal MRI', 1, 'dataset');
+        addQuery('abdominal organ segmentation', 1, 'dataset');
+        addQuery('swin unetr abdominal', 1, 'model');
+        addQuery('nnUNet organ segmentation', 1, 'model');
+        addQuery('AMOS abdominal multi-organ segmentation MRI CT', 1, 'paper');
+        addQuery('AMOS BTCV challenge', 1, 'benchmark');
+
+    } else if (/credit\s*card\s*fraud|fraud\s*detection|financial\s*fraud/i.test(qLower)) {
+        // ── Financial & Credit Card Fraud Detection ───────────────────────────────
+        addQuery('credit card fraud detection', 1, 'dataset');
+        addQuery('IEEE-CIS fraud detection', 1, 'dataset');
+        addQuery('financial fraud tabular', 2, 'dataset');
+        addQuery('fraud detection tabular', 1, 'model');
+        addQuery('tabnet fraud', 1, 'model');
+        addQuery('credit card fraud detection imbalanced tabular machine learning', 1, 'paper');
+        addQuery('ULB credit card fraud benchmark', 1, 'benchmark');
+
     } else {
-        // Î“Ã¶Ã‡Î“Ã¶Ã‡ Generic: Compound Multi-Token Query Generation Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡Î“Ã¶Ã‡
-        //
-        // Strategy: extract [Entity/Target] + [Task] + [Modality] tokens from the query
-        // and build compound search strings. Never fall back to single bare tokens.
-        //
-        let primaryAnatomy = true ? (input.anatomy[0] || '') : (input.anatomy.primary[0] || '');
-        // If primary anatomy is an internal canonical ID (all caps, e.g. PULMONARY_LUNG), fallback to the natural language synonym
+        // ── Generic: Distilled Anchor-Subject Multi-Token Query Generation ────────
+        // Uses clean anchor tokens (2-4 words) so upstream APIs never receive 15-word
+        // conversational sentences or bare subject-less "Image dataset" queries.
+        const { anchorTerms, coreSubjectPhrase } = extractAnchorSubjectTerms(rawQuery);
+
+        let primaryAnatomy = input.anatomy[0] || '';
         if (primaryAnatomy && /^[A-Z_]+$/.test(primaryAnatomy)) {
-            const fallback = true ? input.anatomy[1] : input.anatomy.primary?.[1];
-            if (fallback) {
-                primaryAnatomy = fallback;
-            } else {
-                // If no fallback is provided, map it manually or just make it lowercase
-                primaryAnatomy = primaryAnatomy.toLowerCase().replace(/_/g, ' ');
-            }
-        }
-        const primaryModality = true ? (input.modalities[0] || '') : (input.modality[0] || '');
-        const primaryTask = true
-            ? (input.reconstructionTasks[0] || input.estimationTasks[0] || input.predictionTasks[0] || '')
-            : (input.task || '');
-        const targetEntity = true ? (input.targetEntities[0] || '') : (input.target?.[0] || '');
-
-        // Distill raw query to short phrase (2-5 meaningful words), stripping prompt preamble
-        let strippedQuery = rawQuery
-            .replace(/^(I'm building|i am building|i'm making|i need|we want to|please find|can you recommend|i have|looking for|search for|find me|i'm looking for|we're looking for|we are building|building a|creating a|need a|want a)\b\s*(?:a\s+|an\s+|the\s+|dataset for\s+|model for\s+|system to\s+|system for\s+)?/i, '')
-            .trim();
-            
-        // Additional cleanup of common filler at the start
-        strippedQuery = strippedQuery.replace(/^(system|model|dataset|project)\s+(to|for)\s+/i, '').trim();
-
-        const stopWords = new Set(["with", "using", "for", "the", "and", "data", "dataset", "datasets", "model", "models"]);
-        const shortQueryTokens = strippedQuery.split(/[\n.?,;]/)[0].trim().split(/\s+/).filter(w => !stopWords.has(w.toLowerCase()));
-        const shortQuery = shortQueryTokens.slice(0, 6).join(' ');
-
-        // Build compound queries from extracted structural tokens
-        const entity = targetEntity || primaryAnatomy || shortQueryTokens.slice(0, 2).join(' ');
-        const task = primaryTask || shortQueryTokens.slice(-2).join(' ');
-        const modality = primaryModality && primaryModality !== 'Multimodal / General' ? primaryModality : '';
-
-        // Always include clean, distilled phrases from user's actual query clauses
-        const queryClauses = rawQuery
-            .split(/[/+(),;]/)
-            .map(s => s.replace(/\b\d+\s*gb(?:\s*(?:gpu|vram))?\b/gi, '').trim())
-            .filter(s => s.length >= 3 && !/^(regression|classification|segmentation|detection|ner|summarization|priority|2d|3d|4d|rgb)$/i.test(s));
-
-        for (const clause of queryClauses) {
-            addQuery(`${clause} dataset`, 1, 'dataset');
-            addQuery(clause, 2, 'dataset');
-            addQuery(`${clause} model`, 1, 'model');
-            addQuery(clause, 2, 'model');
-            addQuery(`${clause} deep learning`, 1, 'paper');
+            primaryAnatomy = input.anatomy[1] || primaryAnatomy.toLowerCase().replace(/_/g, ' ');
         }
 
-        if (queryClauses.length >= 2) {
-            const combinedTwo = `${queryClauses[0]} ${queryClauses[1]}`.slice(0, 45);
-            addQuery(`${combinedTwo} dataset`, 1, 'dataset');
-            addQuery(`${combinedTwo} model`, 1, 'model');
+        const rawModality = input.modalities[0] || '';
+        const modality =
+            rawModality && !/^(?:Multimodal \/ General|Image|2D RGB)$/i.test(rawModality)
+                ? rawModality.replace(/\s*\/.*$/, '').trim()
+                : '';
+
+        const rawTask =
+            input.reconstructionTasks[0] ||
+            input.estimationTasks[0] ||
+            input.predictionTasks[0] ||
+            '';
+        const taskShort = rawTask
+            .replace(/\(.*?\)/g, '')
+            .trim()
+            .split(/\s+/)
+            .slice(0, 2)
+            .join(' ');
+
+        const subjectAnchor =
+            coreSubjectPhrase ||
+            primaryAnatomy ||
+            anchorTerms.slice(0, 3).join(' ') ||
+            rawQuery.trim().split(/\s+/).slice(0, 4).join(' ');
+
+        const shortAnchor = anchorTerms.slice(0, 2).join(' ') || subjectAnchor;
+
+        // Tier 1: Subject Anchor + Task (+ Modality if specialized)
+        if (subjectAnchor && taskShort && modality) {
+            addQuery(`${shortAnchor} ${modality} ${taskShort}`, 1, 'dataset');
+            addQuery(`${shortAnchor} ${modality} ${taskShort}`, 1, 'model');
+            addQuery(`${subjectAnchor} ${modality} ${taskShort}`, 1, 'paper');
+        }
+        if (subjectAnchor && taskShort) {
+            addQuery(`${subjectAnchor} ${taskShort}`, 1, 'dataset');
+            addQuery(`${subjectAnchor} ${taskShort}`, 1, 'model');
+            addQuery(`${subjectAnchor} ${taskShort} deep learning`, 1, 'paper');
         }
 
-        // TIER 1: Full compound [Entity + Task + Modality] strings
-        if (entity && task && modality) {
-            addQuery(`${entity} ${task} ${modality} dataset`, 1, 'dataset');
-            addQuery(`${entity} ${task} ${modality} model`, 1, 'model');
-            addQuery(`${entity} ${task} ${modality} deep learning`, 1, 'paper');
-        } else if (entity && task) {
-            addQuery(`${entity} ${task} dataset`, 1, 'dataset');
-            addQuery(`${entity} ${task} model`, 1, 'model');
-            addQuery(`${entity} ${task} deep learning`, 1, 'paper');
-        } else if (shortQuery && shortQuery.length < 60) {
-            addQuery(`${shortQuery} dataset`, 1, 'dataset');
-            addQuery(`${shortQuery} model`, 1, 'model');
-            addQuery(`${shortQuery} deep learning`, 1, 'paper');
+        // Tier 2: Pure Subject Anchor & Pairwise Anchor Combinations
+        if (subjectAnchor) {
+            addQuery(subjectAnchor, 1, 'dataset');
+            addQuery(subjectAnchor, 1, 'model');
+            addQuery(`${subjectAnchor} deep learning`, 2, 'paper');
+            addQuery(`${subjectAnchor} benchmark`, 1, 'benchmark');
+        }
+        if (shortAnchor && shortAnchor !== subjectAnchor) {
+            addQuery(shortAnchor, 2, 'dataset');
+            addQuery(`${shortAnchor} ${taskShort}`.trim(), 2, 'model');
+        }
+        if (anchorTerms.length >= 3) {
+            const pairA = `${anchorTerms[0]} ${anchorTerms[1]}`;
+            const pairB = `${anchorTerms[0]} ${anchorTerms[2]}`;
+            addQuery(pairA, 2, 'dataset');
+            addQuery(pairB, 2, 'dataset');
+            addQuery(pairA, 2, 'model');
         }
 
-        // TIER 2: Entity + Task, Entity + Modality
-        if (entity && modality) {
-            addQuery(`${entity} ${modality} dataset`, 2, 'dataset');
-            addQuery(`${entity} ${modality} model`, 2, 'model');
-        }
-        if (entity) {
-            addQuery(`${entity} deep learning dataset`, 2, 'dataset');
-            addQuery(`${entity} neural network`, 2, 'model');
-        }
-
-        // TIER 3: Modality + Task combinations
-        if (modality && task) {
-            addQuery(`${modality} ${task} dataset`, 3, 'dataset');
-            addQuery(`${modality} ${task} deep learning`, 3, 'model');
-        }
-        if (modality) {
-            addQuery(`${modality} dataset`, 4, 'dataset');
+        // Tier 3: Subject Anchor + Modality (never bare modality without subject!)
+        if (shortAnchor && modality) {
+            addQuery(`${shortAnchor} ${modality}`, 3, 'dataset');
+            addQuery(`${shortAnchor} ${modality}`, 3, 'model');
         }
     }
 

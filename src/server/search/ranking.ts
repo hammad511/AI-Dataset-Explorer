@@ -26,7 +26,19 @@ export function calculateCompositeCandidateScore(
     const cross = evaluateCandidateCrossEncoder(candidate, understanding);
 
     // Step 2: Evidence Verification & Claim Extraction
-    const verified = ({} as any);
+    const candidateBlob = `${candidate.title || candidate.name || ''} ${candidate.description || ''} ${(candidate.tags || []).join(' ')}`.toLowerCase();
+    const hasConfirmedSource = Boolean(candidate.url || candidate.source || (candidate.tags && candidate.tags.length > 0));
+    const computedEvidenceLevel: NonNullable<UnifiedCandidate['evidenceLevel']> = (cross.domainMatch >= 0.7 && cross.targetMatch >= 0.5)
+        ? 'VERIFIED'
+        : 'PARTIAL';
+    const verified = {
+        evidenceStrength: Math.round(((cross.modalityMatch + cross.taskMatch + cross.domainMatch + cross.targetMatch) / 4) * 100),
+        evidenceLevel: computedEvidenceLevel,
+        confirmedClaims: hasConfirmedSource ? ['Verified repository metadata'] : [],
+        warnings: cross.targetMatch === 0 ? ['Zero anchor subject overlap'] : [],
+        evidenceSources: [candidate.source || 'Repository'],
+        evidenceItems: []
+    };
 
     // Step 3: Metadata & Accessibility
     const hasDesc = (candidate.description?.length || 0) > 60;
@@ -60,7 +72,15 @@ export function calculateCompositeCandidateScore(
         0.03 * popularityScore
     );
 
-    const finalMatchScore = Math.max(10, Math.min(100, Math.round(rawComposite * 100)));
+    const hasAnatomyConstraint = Boolean(understanding.anatomy && understanding.anatomy.length > 0);
+    const hasFatalMismatch =
+        (hasAnatomyConstraint && cross.anatomyMatch === 0) ||
+        cross.modalityMatch === 0 ||
+        cross.targetMatch === 0;
+
+    const finalMatchScore = hasFatalMismatch
+        ? 0
+        : Math.max(10, Math.min(100, Math.round(rawComposite * 100)));
 
     // Step 7: Epistemic Confidence Score
     const confidenceScore = calculateConfidenceScore(
@@ -112,8 +132,12 @@ export function calculateCompositeCandidateScore(
         ...candidate,
         modality: explicitModality,
         matchScore: finalMatchScore,
-        confidenceScore,
-        tier,
+        confidenceScore: hasFatalMismatch ? 0 : confidenceScore,
+        tier: hasFatalMismatch ? 'Tier D' : tier,
+        rejected: hasFatalMismatch ? true : Boolean(candidate.rejected),
+        rejectionReason: hasFatalMismatch
+            ? (cross.modalityMatch === 0 ? 'Modality conflict' : (hasAnatomyConstraint && cross.anatomyMatch === 0 ? 'Anatomical conflict' : 'Zero anchor subject overlap'))
+            : (candidate.rejectionReason || null),
         evidenceLevel: verified.evidenceLevel,
         evidenceSources: verified.evidenceSources,
         evidenceStrength: verified.evidenceStrength,

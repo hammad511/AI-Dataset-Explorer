@@ -158,9 +158,9 @@ export async function advancedResearchSearch(
     const modelRerankResult = rerankCandidatesWithConfidence(passedModels, schema, 25);
     const paperRerankResult = rerankCandidatesWithConfidence(passedPapers, schema, 30);
 
-    const rankedDatasets = datasetRerankResult.candidates.filter((d: any) => d.matchScore > 0);
-    const rankedModels = modelRerankResult.candidates.filter((m: any) => m.matchScore > 0);
-    const rankedPapers = paperRerankResult.candidates.filter((p: any) => p.matchScore > 0);
+    const rankedDatasets = datasetRerankResult.candidates.filter((d: any) => d.matchScore >= 35).sort((a: any, b: any) => b.matchScore - a.matchScore);
+    const rankedModels = modelRerankResult.candidates.filter((m: any) => m.matchScore >= 35).sort((a: any, b: any) => b.matchScore - a.matchScore);
+    const rankedPapers = paperRerankResult.candidates.filter((p: any) => p.matchScore >= 35).sort((a: any, b: any) => b.matchScore - a.matchScore);
 
     // Overall confidence = worst of the three (if any primary type is low-confidence, flag it)
     const overallTopScore = Math.max(

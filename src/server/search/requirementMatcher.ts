@@ -11,6 +11,7 @@
 
 import { UnifiedCandidate } from "./types";
 import { RequirementProfile, RequirementMatch, RequirementSatisfaction } from "./types";
+import { DOMAIN_ANCHOR_SYNONYMS } from "./queryUnderstanding";
 
 function clean(s?: unknown): string {
     if (Array.isArray(s)) return (s as unknown[]).map((x) => String(x ?? "")).join(" ").toLowerCase();
@@ -116,10 +117,32 @@ const DOMAIN_MATCHERS: DomainMatcher[] = [
     },
 ];
 
-function matchDomain(blob: string, title: string, reqId: string): RequirementMatch {
-    const matcher = DOMAIN_MATCHERS.find((m) => m.domainId === reqId);
+function matchDomain(blob: string, title: string, reqId: string, detectedValue = ""): RequirementMatch {
+    const domainContext = `${reqId} ${detectedValue}`.toLowerCase();
+    const matcher =
+        DOMAIN_MATCHERS.find((m) => m.domainId === reqId) ||
+        DOMAIN_MATCHERS.find((m) => m.satisfiedPatterns.some((sp) => sp.test(domainContext)));
+
     if (!matcher) {
-        return { requirementId: reqId, status: "UNKNOWN", evidence: null, confidence: 0, explanation: "No domain matcher found" };
+        // Fallback: evaluate detected domain tokens + synonyms directly against title & blob
+        const tokens = detectedValue
+            .toLowerCase()
+            .split(/[\s,;/]+/)
+            .filter((t) => t.length > 2);
+        if (tokens.length === 0) {
+            return { requirementId: reqId, status: "UNKNOWN", evidence: null, confidence: 0, explanation: "No domain matcher found" };
+        }
+        const matched = tokens.filter((t) => {
+            const syns = [t, ...(DOMAIN_ANCHOR_SYNONYMS[t] || [])];
+            return syns.some((s) => blob.includes(s.toLowerCase()));
+        });
+        if (matched.length === tokens.length) {
+            return { requirementId: reqId, status: "SATISFIED", evidence: matched.join(", "), confidence: 0.85, explanation: `Domain terms confirmed: ${matched.join(", ")}` };
+        }
+        if (matched.length > 0) {
+            return { requirementId: reqId, status: "PARTIAL", evidence: matched.join(", "), confidence: 0.55, explanation: `Partial domain alignment: ${matched.join(", ")}` };
+        }
+        return { requirementId: reqId, status: "NOT_SATISFIED", evidence: null, confidence: 0, explanation: `Domain "${detectedValue}" not found in candidate metadata` };
     }
     // Check conflict first (title-primary)
     for (const cp of matcher.conflictPatterns) {
@@ -237,7 +260,7 @@ export function matchCandidateRequirements(
         switch (req.category) {
             // ── Domain ────────────────────────────────────────────────────────
             case "DOMAIN": {
-                m = matchDomain(blob, title, req.id);
+                m = matchDomain(blob, title, req.id, req.detectedValue);
                 break;
             }
 
@@ -249,40 +272,59 @@ export function matchCandidateRequirements(
                 let evidence: string | null = null;
                 let explanation = "";
 
-                if (primary === "3d ct" || primary === "ct") {
-                    const hasCT = /\bct\b|computed\s*tomography|chest\s*ct|3d\s*ct|ct\s*scan|dicom\s*ct|ct\s*volume/i.test(blob);
+                if (primary === "3d ct" || primary === "ct" || primary === "cta") {
+                    const hasCT = /\bct\b|\bcta\b|\bccta\b|computed\s*tomography|chest\s*ct|3d\s*ct|ct\s*scan|dicom\s*ct|ct\s*volume/i.test(blob);
                     const has3D = /3d|volumetric|nifti|\.nii|3\s*d\s*volume/i.test(blob);
                     if (hasCT && (primary !== "3d ct" || has3D)) {
                         status = "SATISFIED";
                         evidence = "CT confirmed";
-                        explanation = primary === "3d ct" && !has3D
-                            ? "CT confirmed but 3D volumetric structure not explicitly verified"
-                            : "3D CT confirmed in metadata";
+                        explanation = "CT modality confirmed in metadata";
                     } else if (hasCT) {
                         status = "PARTIAL";
                         evidence = "CT found";
                         explanation = "CT modality found but 3D volumetric not verified";
-                    } else if (/chest|pulmonary|thoracic/i.test(blob)) {
-                        status = "UNKNOWN";
-                        explanation = "Chest domain but CT modality not confirmed";
                     } else {
                         status = "NOT_SATISFIED";
                         explanation = "CT modality not found in metadata";
                     }
-                } else if (primary === "mri") {
-                    if (/\bmri\b|magnetic\s*resonance|mr\s*imaging/i.test(blob)) {
+                } else if (primary === "mri" || primary === "3d mri") {
+                    if (/\bmri\b|\bfmri\b|magnetic\s*resonance|mr\s*imaging|nifti|\.nii/i.test(blob)) {
                         status = "SATISFIED";
                         evidence = "MRI confirmed";
                         explanation = "MRI modality confirmed";
-                    } else if (/imaging|scan|medical/i.test(blob)) {
-                        status = "UNKNOWN";
-                        explanation = "Medical imaging found but MRI not confirmed";
                     } else {
                         status = "NOT_SATISFIED";
                         explanation = "MRI not found in metadata";
                     }
-                } else if (primary === "audio" || primary === "speech") {
-                    if (/audio|speech|wav|sound|acoustic/i.test(blob)) {
+                } else if (/^x[- ]?ray$|^cxr$/i.test(primary)) {
+                    if (/x[- ]?ray|\bcxr\b|radiograph|chexpert|mimic[- ]cxr/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "X-ray confirmed";
+                        explanation = "X-ray / radiograph modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "X-ray modality not found";
+                    }
+                } else if (primary === "ultrasound") {
+                    if (/ultrasound|echocardio|sonograph/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Ultrasound confirmed";
+                        explanation = "Ultrasound modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Ultrasound modality not found";
+                    }
+                } else if (primary === "eeg" || primary === "ieeg") {
+                    if (/\beeg\b|\bieeg\b|\becog\b|electroencephalog|seizure/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "EEG confirmed";
+                        explanation = "EEG modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "EEG modality not found";
+                    }
+                } else if (primary === "audio" || primary === "speech" || primary === "voice") {
+                    if (/audio|speech|wav|sound|acoustic|voice|utterance|asr/i.test(blob)) {
                         status = "SATISFIED";
                         evidence = "Audio/speech confirmed";
                         explanation = "Audio modality confirmed";
@@ -290,21 +332,112 @@ export function matchCandidateRequirements(
                         status = "NOT_SATISFIED";
                         explanation = "Audio modality not found";
                     }
-                } else if (primary === "dermoscopy") {
-                    if (/dermoscop|isic|ham10000|skin\s*lesion/i.test(blob)) {
+                } else if (primary === "video") {
+                    if (/video|cctv|dash\s*cam|surveillance|mp4|avi|frame\s*sequence/i.test(blob)) {
                         status = "SATISFIED";
-                        evidence = "Dermoscopy confirmed";
-                        explanation = "Dermoscopy modality confirmed";
+                        evidence = "Video confirmed";
+                        explanation = "Video modality confirmed";
+                    } else if (/image|vision|detection|tracking/i.test(blob)) {
+                        status = "PARTIAL";
+                        evidence = "Visual frame modality";
+                        explanation = "Image/frame modality compatible with video pipeline";
                     } else {
-                        status = "UNKNOWN";
-                        explanation = "Dermoscopy not confirmed in metadata";
+                        status = "NOT_SATISFIED";
+                        explanation = "Video modality not found";
+                    }
+                } else if (/^(?:text|multilingual|language|notes?|documents?|nlp)$/i.test(primary)) {
+                    if (/\btext\b|\bnlp\b|language|multilingual|corpus|token|sentence|document|notes?|bert|roberta|llm|ner\b|rag\b|question[- ]answering|translation|summariz/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Text/NLP confirmed";
+                        explanation = "Text / NLP modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Text / NLP modality not found";
+                    }
+                } else if (primary === "tabular" || primary === "csv") {
+                    if (/tabular|\.csv\b|structured\s*data|dataframe|table|transaction|xgboost|lightgbm|tabnet|credit|fraud|ehr|clinical\s*record/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Tabular/CSV confirmed";
+                        explanation = "Tabular modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Tabular modality not found";
+                    }
+                } else if (/time[- ]series|sensor/i.test(primary)) {
+                    if (/time[- ]series|temporal|sensor|forecasting|eeg|ecg|imu|sequential/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Time-series confirmed";
+                        explanation = "Time-series / sensor modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Time-series modality not found";
+                    }
+                } else if (/satellite|multispectral|hyperspectral|geospatial/i.test(primary)) {
+                    if (/satellite|multispectral|hyperspectral|remote\s*sensing|aerial|geospatial|earth\s*observation|sentinel|landsat|sar\b/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Satellite/Remote Sensing confirmed";
+                        explanation = "Satellite / multispectral modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Satellite / multispectral modality not found";
+                    }
+                } else if (/thermal|infrared/i.test(primary)) {
+                    if (/thermal|infrared|\bir\b|thermograph|electroluminescen|solar\s*panel|pv\b/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Thermal/Infrared confirmed";
+                        explanation = "Thermal / infrared imaging confirmed";
+                    } else if (/image|vision|defect|detection/i.test(blob)) {
+                        status = "PARTIAL";
+                        evidence = "Visual inspection modality";
+                        explanation = "Visual imaging found (thermal/IR not explicitly tagged)";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Thermal / imaging modality not found";
+                    }
+                } else if (/microscop|histolog/i.test(primary)) {
+                    if (/microscop|histolog|histopatholog|fluorescence|nuclei|cell|monuseg|pathology|slide|wsi\b/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Microscopy/Histology confirmed";
+                        explanation = "Microscopy / histopathology modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Microscopy modality not found";
+                    }
+                } else if (/dermoscop|fundus/i.test(primary)) {
+                    if (/dermoscop|isic|ham10000|skin\s*lesion|melanoma|fundus|retina|eyepacs|messidor/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = `${primary} confirmed`;
+                        explanation = `${primary} modality confirmed`;
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = `${primary} modality not found`;
+                    }
+                } else if (/lidar|point[- ]cloud/i.test(primary)) {
+                    if (/lidar|point[- ]cloud|3d\s*object|kitti|nuscenes|waymo|velodyne/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "LiDAR / Point-cloud confirmed";
+                        explanation = "LiDAR / 3D point-cloud modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "LiDAR / point-cloud modality not found";
+                    }
+                } else if (/image|photo|rgb/i.test(primary)) {
+                    if (/image|photo|vision|rgb|png|jpg|jpeg|coco|yolo|vit\b|resnet|convnext|segmentation|detection|classification/i.test(blob)) {
+                        status = "SATISFIED";
+                        evidence = "Image/Vision confirmed";
+                        explanation = "Image modality confirmed";
+                    } else {
+                        status = "NOT_SATISFIED";
+                        explanation = "Image modality not found";
                     }
                 } else {
-                    status = /\bct\b|\bmri\b|imaging|scan/i.test(blob) ? "PARTIAL" : "UNKNOWN";
-                    explanation = "Modality presence uncertain";
+                    const hasGeneric = blob.includes(primary);
+                    status = hasGeneric ? "SATISFIED" : "UNKNOWN";
+                    evidence = hasGeneric ? primary : null;
+                    explanation = hasGeneric ? `Modality "${primary}" confirmed` : "Modality presence uncertain";
                 }
 
-                m = { requirementId: req.id, status, evidence, confidence: status === "SATISFIED" ? 0.9 : status === "PARTIAL" ? 0.6 : 0, explanation };
+                m = { requirementId: req.id, status, evidence, confidence: status === "SATISFIED" ? 0.92 : status === "PARTIAL" ? 0.6 : 0, explanation };
                 break;
             }
 
@@ -413,25 +546,64 @@ export function matchCandidateRequirements(
                 break;
             }
 
-            // ── Target / Outcome ──────────────────────────────────────────────
+            // ── Target / Subject Anchor ────────────────────────────────────────
             case "TARGET": {
-                const targets = req.detectedValue.split(";").map((t) => t.trim().toLowerCase());
-                let satisfied = 0;
+                const rawTargets = req.detectedValue
+                    .split(/[;,]/)
+                    .map((t) => t.trim().toLowerCase())
+                    .filter((t) => t.length >= 2);
+
+                let satisfiedGroups = 0;
+                let titleHits = 0;
                 const found: string[] = [];
-                for (const t of targets) {
-                    const words = t.split(/\s+/);
-                    const anyWord = words.some((w) => w.length > 3 && blob.includes(w));
-                    if (anyWord) { satisfied++; found.push(t); }
+
+                for (const t of rawTargets) {
+                    const words = t.split(/\s+/).filter((w) => w.length >= 2);
+                    const synPool = new Set<string>(words);
+                    for (const w of words) {
+                        for (const syn of DOMAIN_ANCHOR_SYNONYMS[w] || []) {
+                            synPool.add(syn.toLowerCase());
+                        }
+                    }
+
+                    const synList = Array.from(synPool);
+                    const matchedInTitle = synList.some((s) => title.includes(s) || tags.includes(s));
+                    const matchedInBlob = matchedInTitle || synList.some((s) => blob.includes(s));
+
+                    if (matchedInTitle) titleHits++;
+                    if (matchedInBlob) {
+                        satisfiedGroups++;
+                        found.push(t);
+                    }
                 }
-                const ratio = targets.length > 0 ? satisfied / targets.length : 0;
+
+                const ratio = rawTargets.length > 0 ? satisfiedGroups / rawTargets.length : 0;
+                let status: RequirementSatisfaction;
+
+                if (ratio >= 0.6 || (titleHits >= 1 && ratio >= 0.45)) {
+                    status = "SATISFIED";
+                } else if (satisfiedGroups >= 1) {
+                    status = "PARTIAL";
+                } else if (
+                    candidate.type === "model" &&
+                    /\b(?:yolov8|yolov9|yolov10|detr|segformer|swin|unetr|unet|vit|convnext|resnet|efficientnet|densenet|roberta|deberta|biobert|pubmedbert|legal-bert|bge-m3|wav2vec|hubert|whisper|tabnet|xgboost)\b/i.test(blob)
+                ) {
+                    // Transfer-learning foundation backbone for the target task
+                    status = "PARTIAL";
+                    found.push("transfer-learning backbone");
+                } else {
+                    status = "NOT_SATISFIED";
+                }
+
                 m = {
                     requirementId: req.id,
-                    status: ratio >= 0.7 ? "SATISFIED" : ratio >= 0.3 ? "PARTIAL" : "NOT_SATISFIED",
-                    evidence: found.length > 0 ? `Found: ${found.join("; ")}` : null,
-                    confidence: ratio,
-                    explanation: ratio > 0
-                        ? `${satisfied}/${targets.length} target requirements matched in metadata`
-                        : "Required prediction targets not found in metadata",
+                    status,
+                    evidence: found.length > 0 ? `Matched subject concepts: ${found.join(", ")}` : null,
+                    confidence: status === "SATISFIED" ? Math.max(0.75, ratio) : status === "PARTIAL" ? Math.max(0.45, ratio) : 0,
+                    explanation:
+                        status !== "NOT_SATISFIED"
+                            ? `${satisfiedGroups}/${rawTargets.length} core subject concepts matched (${found.join(", ")})`
+                            : `Candidate does not match core problem subject (${rawTargets.join(", ")})`,
                 };
                 break;
             }

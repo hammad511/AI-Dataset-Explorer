@@ -223,21 +223,8 @@ export function scoreCandidate(
         dimensionScore = isCandidate3D ? 25 : 95;
     }
 
-    // Generalized Entity and Subject Target Overlap
-    let targetScore = Math.round(cross.targetMatch * 100);
-    const queryEntities = (schema.targetEntities || []).filter((e: string) => e && e.length > 2);
-    if (queryEntities.length > 0) {
-        let entityMatches = 0;
-        for (const entity of queryEntities) {
-            const words = entity.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-            const matchedWords = words.filter((w: string) => candidateBlob.includes(w));
-            if (matchedWords.length > 0) {
-                entityMatches += (matchedWords.length / words.length);
-            }
-        }
-        const entityCoverage = Math.min(1.0, entityMatches / queryEntities.length);
-        targetScore = Math.max(targetScore, Math.round(entityCoverage * 100));
-    }
+    // Generalized Entity and Subject Target Overlap (uses synonym-aware anchor score from crossEncoder)
+    const targetScore = Math.round(cross.targetMatch * 100);
 
     // 🚀 — PHASE 1.5: Calibrate Evidence Coverage (Requirements) — 
     const explicitCandidateMod = (candidate as UnifiedCandidate).modality ?? undefined;
@@ -293,9 +280,12 @@ export function scoreCandidate(
         return reqDef?.importance === 'CRITICAL';
     });
 
-    const hardFailed = failedReqs2.some(m => ['req_modality', 'req_vram', 'req_longitudinal'].includes(m.requirementId)) || 
+    const hasAnatomyQuery = Boolean(schema.anatomy && schema.anatomy.length > 0);
+    const hardFailed = failedReqs2.some(m => ['req_modality', 'req_vram', 'req_longitudinal', 'req_object'].includes(m.requirementId)) || 
                        missingCriticalReqs.length > 0 || 
-                       hasContradiction;
+                       hasContradiction ||
+                       (hasAnatomyQuery && anatomyScore === 0) ||
+                       targetScore === 0;
 
     // Per-item continuous confidence calculation (never static tier lookup table)
     let baseConfidence = 0;
@@ -392,11 +382,11 @@ export function scoreCandidate(
             (popularityScore * 0.15)
         );
 
-        // Apply 4-factor weights
+        // Apply 4-factor weights (elevate domain/target precision to prevent generic results from floating up)
         const rawWeighted = (
-            0.35 * S_modality +
-            0.30 * S_task +
-            0.20 * S_domain +
+            0.28 * S_modality +
+            0.27 * S_task +
+            0.30 * S_domain +
             0.15 * S_semantic
         );
 
@@ -406,6 +396,11 @@ export function scoreCandidate(
         );
 
         finalScore = Math.max(0, Math.min(100, Math.round(rawWeighted - penaltyTotal)));
+
+        // Cap transfer-learning foundation models that lack direct domain/subject match
+        if (candidate.type === 'model' && targetScore <= 35 && domainScore < 55) {
+            finalScore = Math.min(finalScore, 68);
+        }
     }
 
 

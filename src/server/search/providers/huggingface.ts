@@ -126,13 +126,18 @@ export async function fetchHuggingFaceModels(
     const queryTaskText = `${understanding.rawQuery} ${(understanding.tasks && understanding.tasks[0]) || ''}`;
     const canonicalTask = classifyTask(queryTaskText);
     const hfPipelineTag = canonicalTask !== 'DISCOVERY' ? canonicalTaskToHFPipelineTag(canonicalTask) : null;
-    void hfPipelineTag;
-
     let hitRateLimitOrOutage = false;
 
-    for (const q of queries.slice(0, 4)) {
+    const urlsToFetch: string[] = [];
+    for (const [idx, q] of queries.slice(0, 4).entries()) {
+        urlsToFetch.push(`${HF_MODELS_API}?search=${encodeURIComponent(q)}&limit=30&${HF_EXPAND_QUERY_PARAMS}`);
+        if (hfPipelineTag && idx < 2) {
+            urlsToFetch.push(`${HF_MODELS_API}?pipeline_tag=${encodeURIComponent(hfPipelineTag)}&search=${encodeURIComponent(q)}&limit=20&${HF_EXPAND_QUERY_PARAMS}`);
+        }
+    }
+
+    for (const url of urlsToFetch) {
         try {
-            const url = `${HF_MODELS_API}?search=${encodeURIComponent(q)}&limit=30&${HF_EXPAND_QUERY_PARAMS}`;
             const res = await fetchHuggingFaceWithRetry(url, headers, { timeoutMs: 6000, maxRetries: 2 });
 
             if (!res) {
