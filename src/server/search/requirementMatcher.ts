@@ -422,7 +422,7 @@ export function matchCandidateRequirements(
                         explanation = "LiDAR / point-cloud modality not found";
                     }
                 } else if (/image|photo|rgb/i.test(primary)) {
-                    if (/image|photo|vision|rgb|png|jpg|jpeg|coco|yolo|vit\b|resnet|convnext|segmentation|detection|classification/i.test(blob)) {
+                    if (/image|photo|vision|rgb|png|jpg|jpeg|coco|yolo|vit\b|resnet|convnext|segmentation|detection|classification|ocr|scanned|receipt|invoice|document|donut|layoutlm|trocr|vqa|florence|qwen2[- ]?vl|pixel|visual/i.test(blob)) {
                         status = "SATISFIED";
                         evidence = "Image/Vision confirmed";
                         explanation = "Image modality confirmed";

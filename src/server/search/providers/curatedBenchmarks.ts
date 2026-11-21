@@ -1450,6 +1450,134 @@ const EXTENDED_CURATED_BENCHMARKS = {
             }),
         ],
     },
+    receiptInvoiceOcr: {
+        datasets: [
+            createCuratedDataset({
+                id: 'naver-clova-ix/cord-v2',
+                title: 'CORD-v2 — Consolidated Receipt Dataset for Post-OCR Line Item & Key Information Extraction',
+                description: 'Gold-standard benchmark of 11,000+ scanned receipt images annotated with structured JSON hierarchies for line items, unit prices, quantities, subtotals, dates, merchant names, and tax IDs.',
+                url: 'https://huggingface.co/datasets/naver-clova-ix/cord-v2',
+                source: 'Hugging Face',
+                license: 'CC-BY-4.0 / Apache-2.0 (Commercial Safe)',
+                size: '2.1 GB',
+                samples: '11,000+ scanned receipts with structured line-item JSON annotations',
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)', 'Image-to-Text'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['receipt', 'invoice', 'ocr', 'scanned', 'cord', 'donut', 'line-items', 'document-ai', 'apache-2.0'],
+                whyMatches: [
+                    'Directly provides noisy/messy scanned receipt images annotated with structured line items, totals, tax fields, and dates',
+                    'Commercial-safe open license designed for end-to-end OCR-free (Donut) and token-classification (LayoutLMv3) pipelines',
+                ],
+            }),
+            createCuratedDataset({
+                id: 'katanaml-org/invoices-donut-data-v1',
+                title: 'Invoices & Scanned Receipts Key-Value & Line-Item Extraction Corpus (SROIE + Invoice-Donut)',
+                description: 'Curated collection of scanned commercial invoices and retail receipts annotated in Donut/JSON and BIO key-value format for extracting vendor tax IDs (IBAN/VAT), invoice dates, billing line items, and totals.',
+                url: 'https://huggingface.co/datasets/katanaml-org/invoices-donut-data-v1',
+                source: 'Hugging Face',
+                license: 'MIT (Commercial Safe)',
+                size: '680 MB',
+                samples: '5,500+ annotated scanned invoices & receipts',
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)', 'Image-to-Text'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['invoice', 'receipt', 'scanned', 'ocr', 'sroie', 'vendor', 'tax', 'line-items', 'mit'],
+                whyMatches: [
+                    'Specifically targets vendor tax IDs, invoice dates, and structured line items from scanned invoices under a permissive MIT license',
+                ],
+            }),
+        ],
+        models: [
+            createCuratedModel({
+                id: 'naver-clova-ix/donut-base-finetuned-cord-v2',
+                title: 'Donut-Base (200M) — OCR-Free Receipt & Invoice Structured JSON Extractor',
+                description: 'End-to-end Vision Encoder-Decoder (Swin-Base + BART) that maps raw scanned receipt and invoice images directly to structured JSON (line items, dates, tax IDs) without an external OCR engine. Fits easily on a single 16GB T4 GPU (~2.4 GB VRAM FP16).',
+                url: 'https://huggingface.co/naver-clova-ix/donut-base-finetuned-cord-v2',
+                license: 'MIT',
+                size: '805 MB (200M params, ~2.4 GB VRAM FP16 on 16GB T4)',
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)', 'Image-to-Text'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['receipt', 'invoice', 'ocr', 'scanned', 'donut', 'cord', 'line-items', 'mit'],
+                architecture: 'Donut Swin-BART (200M)',
+                framework: 'PyTorch / Transformers',
+                whyMatches: [
+                    'MIT commercial-safe license and lightweight 200M footprint runs at <3 GB VRAM in FP16 on a single 16GB T4 GPU',
+                    'Directly outputs structured JSON of receipt/invoice line items, dates, and tax totals without brittle OCR post-processing',
+                ],
+            }),
+            createCuratedModel({
+                id: 'microsoft/Florence-2-large-ft',
+                title: 'Florence-2-Large (0.77B) — Commercial-Safe Vision-Language Document & Receipt Parser',
+                description: 'Lightweight 770M-parameter vision-language foundation model trained for dense OCR, region-to-text, and structured document extraction; supports LoRA / QLoRA fine-tuning in under 6 GB VRAM on a single 16GB T4 GPU.',
+                url: 'https://huggingface.co/microsoft/Florence-2-large-ft',
+                license: 'MIT',
+                size: '1.5 GB (770M params, ~4.8 GB VRAM LoRA on 16GB T4)',
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)', 'Image-to-Text'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['receipt', 'invoice', 'ocr', 'document', 'florence-2', 'vlm', 'qlora', 'mit'],
+                architecture: 'DaViT + Transformer VLM (770M)',
+                framework: 'PyTorch / Transformers / PEFT',
+                whyMatches: [
+                    'MIT-licensed 0.77B vision-language model purpose-built for OCR and structured extraction on 16GB T4 GPUs via LoRA/QLoRA',
+                ],
+            }),
+            createCuratedModel({
+                id: 'microsoft/layoutlmv3-base',
+                title: 'LayoutLMv3-Base (125M) — Multimodal Text + Layout + Image Invoice & Receipt Extractor',
+                description: 'Unified text, 2D bounding-box layout, and image patch Transformer for extracting vendor tax IDs, dates, and table line items from messy scanned invoices and receipts.',
+                url: 'https://huggingface.co/microsoft/layoutlmv3-base',
+                license: 'MIT',
+                size: '500 MB (125M params, ~2.0 GB VRAM FP16)',
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)', 'Token Classification'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['invoice', 'receipt', 'scanned', 'ocr', 'layoutlmv3', 'document-ai', 'mit'],
+                architecture: 'LayoutLMv3-Base (125M)',
+                framework: 'PyTorch / Transformers',
+                whyMatches: [
+                    'Jointly models 2D spatial layout coordinates and visual cues to disambiguate vendor tax IDs, dates, and multi-row line items',
+                    'MIT commercial license and 125M parameter count trains rapidly on a single 16GB T4 GPU',
+                ],
+            }),
+        ],
+        papers: [
+            createCuratedPaper({
+                id: 'ppr_donut_eccv_2022',
+                title: 'OCR-Free Document Understanding Transformer (Donut)',
+                description: 'Introduces an end-to-end Transformer architecture that extracts structured JSON fields (line items, dates, vendor IDs) directly from scanned receipt and invoice images without off-the-shelf OCR.',
+                url: 'https://arxiv.org/abs/2111.15664',
+                venue: 'ECCV 2022',
+                year: 2022,
+                citations: 980,
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['receipt', 'invoice', 'ocr', 'donut', 'cord', 'document-understanding'],
+                whyMatches: [
+                    'Establishes the industry-standard OCR-free receipt and invoice JSON extraction architecture',
+                ],
+            }),
+            createCuratedPaper({
+                id: 'ppr_layoutlmv3_acmmm_2022',
+                title: 'LayoutLMv3: Pre-training for Document AI with Unified Text and Image Masking',
+                description: 'Presents a unified multimodal Transformer for form, receipt, and invoice key information extraction that achieves state-of-the-art accuracy on CORD, FUNSD, and DocVQA.',
+                url: 'https://arxiv.org/abs/2204.08387',
+                venue: 'ACM Multimedia 2022',
+                year: 2022,
+                citations: 890,
+                modality: ['Image', 'Document OCR'],
+                task: ['Document OCR & Key Information Extraction (KIE)'],
+                domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+                tags: ['receipt', 'invoice', 'layoutlmv3', 'cord', 'document-ai'],
+                whyMatches: [
+                    'Foundational benchmark paper for multimodal layout + image extraction on scanned receipts and invoices',
+                ],
+            }),
+        ],
+    },
 };
 
 export function getCuratedBenchmarksForQuery(understanding: StructuredQueryUnderstanding): {
@@ -1473,6 +1601,7 @@ export function getCuratedBenchmarksForQuery(understanding: StructuredQueryUnder
     const isSkinMelanoma = /(\bskin\b|\bmelanoma\b|\bdermoscop\w*\b|\bisic\b|\bham10000\b).*(\blesion\b|\bmelanoma\b|\bcancer\b|\bclassification\b|\bsegmentation\b)/i.test(rawQ);
     const isSpeechEmotion = /(\bspeech\b|\baudio\b|\bvoice\b|\bravdess\b).*(\bemotion\b|\baffective\b|\bser\b)/i.test(rawQ);
     const isCreditFraud = /(\bcredit\s*card\b|\bfraud\b|\btransaction\b|\bfinancial\b).*(\bfraud\b|\banomaly\b|\btabular\b|\bdetection\b)/i.test(rawQ);
+    const isReceiptInvoice = /\breceipts?\b|\binvoices?\b|\bsroie\b|\bcord\b|\bdocvqa\b|\bdonut\b|\blayoutlm\w*\b|(\bscanned\b|\bocr\b).*(\bdocument\b|\bform\b|\bline\s*item\b|\btax\b|\bvendor\b)/i.test(rawQ);
 
     const datasets: UnifiedCandidate[] = [];
     const models: UnifiedCandidate[] = [];
@@ -1569,6 +1698,11 @@ export function getCuratedBenchmarksForQuery(understanding: StructuredQueryUnder
         datasets.push(...EXTENDED_CURATED_BENCHMARKS.creditFraud.datasets);
         models.push(...EXTENDED_CURATED_BENCHMARKS.creditFraud.models);
         papers.push(...EXTENDED_CURATED_BENCHMARKS.creditFraud.papers);
+    }
+    if (isReceiptInvoice) {
+        datasets.push(...EXTENDED_CURATED_BENCHMARKS.receiptInvoiceOcr.datasets);
+        models.push(...EXTENDED_CURATED_BENCHMARKS.receiptInvoiceOcr.models);
+        papers.push(...EXTENDED_CURATED_BENCHMARKS.receiptInvoiceOcr.papers);
     }
 
     return {

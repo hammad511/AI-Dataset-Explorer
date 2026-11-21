@@ -328,6 +328,22 @@ export function expandQueries(
         addQuery('MPII human pose dataset', 2, 'dataset');
         addQuery('keypoint detection pose estimation', 3, 'dataset');
 
+    } else if (/\breceipts?\b|\binvoices?\b|\bocr\b|optical\s*character|scanned\s*(?:document|receipt|invoice|form)|key\s*information\s*extraction|\bkie\b|\bdocvqa\b|\bsroie\b|\bcord\b|\bdonut\b|\blayoutlm\w*\b/i.test(qLower)) {
+        // ── Document AI, Receipt & Invoice OCR / Structured Extraction ────────────
+        addQuery('receipt invoice', 1, 'dataset');
+        addQuery('CORD receipt', 1, 'dataset');
+        addQuery('SROIE receipt', 1, 'dataset');
+        addQuery('invoice extraction', 1, 'dataset');
+        addQuery('DocVQA document', 2, 'dataset');
+        addQuery('donut receipt', 1, 'model');
+        addQuery('invoice donut', 1, 'model');
+        addQuery('layoutlmv3', 1, 'model');
+        addQuery('trocr', 2, 'model');
+        addQuery('florence-2', 2, 'model');
+        addQuery('receipt invoice key information extraction OCR', 1, 'paper');
+        addQuery('Donut OCR-free document understanding transformer', 1, 'paper');
+        addQuery('CORD SROIE DocVQA benchmark', 1, 'benchmark');
+
     } else if (/(?:clinical|pathology|medical|biomedical|oncology|ehr)\s*(?:ner\b|notes?|text|nlp|named\s*entity)|(?:\bner\b|named\s*entity).*(?:clinical|pathology|medical|biomedical|disease)/i.test(qLower)) {
         // ── Clinical & Pathology NER / Biomedical NLP ─────────────────────────────
         addQuery('clinical NER', 1, 'dataset');

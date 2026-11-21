@@ -7,8 +7,8 @@ const CATEGORY_WEIGHT: Partial<Record<RequirementCategory, number>> = {
     DATA_SIZE: 0.05, LABEL_AVAILABILITY: 0.06, OTHER: 0.04,
     PRETRAINING: 0.03, COMPUTE: 0.04, TEMPORAL: 0.04, MULTIMODAL: 0.06,
 };
-const TASKS = /classification|classify|recognition|segmentation|segment(?:ation)?|detection|detect|localization|tracking|forecast(?:ing)?|prediction|regression|ranking|priority|retrieval|recommendation|clustering|generation|translation|summarization|summariz|question answering|speech recognition|pose estimation|anomaly detection|control|planning|reinforcement learning|named entity recognition|\bner\b|\brag\b/i;
-const MODALITIES = /image|photo(?:graph)?s?|video|audio|speech|voice|text|multilingual|language|notes?|documents?|tabular|csv|time[- ]series|sensor|3d|3-d|point[- ]cloud|multimodal|genomic|geospatial|satellite|multispectral|hyperspectral|thermal|infrared|microscop|histolog|dermoscop|fundus|x[- ]?ray|cxr|ct\b|cta\b|mri\b|ultrasound|eeg|ieeg|lidar|cryo[- ]?e[mt]/i;
+const TASKS = /\b(?:classification|classify|recognition|segmentation|segment(?:ation)?|detection|detect|localization|tracking|forecast(?:ing)?|prediction|regression|ranking|priority|retrieval|recommendation|clustering|generation|translation|summarization|summariz\w*|question answering|speech recognition|pose estimation|anomaly detection|control|planning|reinforcement learning|named entity recognition|ner|rag|ocr|optical character recognition|information extraction|key information extraction|kie|document parsing|document understanding)\b/i;
+const MODALITIES = /\b(?:images?|photo(?:graph)?s?|videos?|audio|speech|voice|text|multilingual|language|notes?|documents?|tabular|csv|time[- ]series|sensor|3d|3-d|point[- ]cloud|multimodal|genomics?|geospatial|satellite|multispectral|hyperspectral|thermal|infrared|microscop\w*|histolog\w*|dermoscop\w*|fundus|x[- ]?ray|cxr|ct|cta|mri|ultrasound|eeg|ieeg|lidar|cryo[- ]?e[mt])\b/i;
 const STRUCTURE = /2d|3d|4d|volumetric|sequence|sequential|temporal|spatial|graph|point[- ]cloud|stream/i;
 
 function unique(values: string[]): string[] { return [...new Set(values.map(value => value.trim()).filter(Boolean))]; }
@@ -97,8 +97,8 @@ export function extractRequirementProfile(rawQuery: string): RequirementProfile 
     const year = Number(lower.match(/(?:after|since|from|published\s+in)\s+(20\d{2})/i)?.[1] || '') || null;
     if (year) add(requirements, hardRequirementIds, softRequirementIds, 'req_year', 'OTHER', String(year), `Research year: ${year}`, false, 0.9, 'explicit');
 
-    const negatives = lower.match(/(?:not|without|excluding|exclude|only)\s+([a-z][a-z0-9 -]{2,50})/gi) || [];
-    negativeRequirements.push(...negatives.map(value => value.replace(/^(not|without|excluding|exclude|only)\s+/i, '').trim()));
+    const negatives = lower.match(/\b(?:not|without|excluding|exclude)\s+([a-z][a-z0-9 -]{2,50})/gi) || [];
+    negativeRequirements.push(...negatives.map(value => value.replace(/^(not|without|excluding|exclude)\s+/i, '').trim()));
     if (negativeRequirements.length) add(requirements, hardRequirementIds, softRequirementIds, 'req_negative', 'OTHER', negativeRequirements.join(', '), `Excluded concepts: ${negativeRequirements.join(', ')}`, true, 0.9, 'explicit');
     if (/prefer|preferred|ideally|would like/i.test(lower)) preferences.push('user preference stated');
 

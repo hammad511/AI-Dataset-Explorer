@@ -115,6 +115,8 @@ const INCOMPATIBLE_PAIRS: [ModalityGroup, ModalityGroup][] = [
 // to a canonical ModalityGroup.
 
 const CANDIDATE_MODALITY_SIGNALS: [RegExp, ModalityGroup][] = [
+    // Document AI / OCR / Vision-Language (bridges Document Image + Structured Text)
+    [/\b(?:receipts?|invoices?|ocr|optical\s*character|scanned\s*(?:document|receipt|invoice|form|image)|docvqa|sroie|cord\b|funsd|rvl[- ]?cdip|donut|layoutlm\w*|trocr|nougat|florence|qwen2[- ]?vl|paligemma|pix2struct|image[- ]to[- ]text|document[- ]question[- ]answering|visual[- ]question[- ]answering|vision[- ]language|\bvlm\b|\bvqa\b)\b/i, 'MULTIMODAL'],
     // Audio / Speech
     [/\baudio\b|\bspeech\b|\bwav\b|\bsound\b|\bacoustic\b|\bvoice\b|\bspeaker\b|\bphone\b|\basr\b/i, 'AUDIO'],
     // Medical Acoustic (Ultrasound)
@@ -144,6 +146,7 @@ const CANDIDATE_MODALITY_SIGNALS: [RegExp, ModalityGroup][] = [
 // ── Query → ModalityGroup mapping ─────────────────────────────────────────────
 
 const QUERY_MODALITY_SIGNALS: [RegExp, ModalityGroup][] = [
+    [/\b(?:receipts?|invoices?|ocr|optical\s*character|scanned\s*(?:document|receipt|invoice|form|image)|docvqa|sroie|cord\b|funsd|rvl[- ]?cdip|donut|layoutlm\w*|trocr|nougat|florence|qwen2[- ]?vl|paligemma|pix2struct|image[- ]to[- ]text|document[- ]question[- ]answering|visual[- ]question[- ]answering|vision[- ]language|\bvlm\b|\bvqa\b)\b/i, 'MULTIMODAL'],
     [/\baudio\b|\bspeech\b|\bsound\b|\bwav\b|\bacoustic\b|\bvoice\b|\basr\b/i, 'AUDIO'],
     [/ultrasound|echocardio|sonograph|acoustic\s*(?:imaging|medical)/i, 'MEDICAL_ACOUSTIC'],
     [/\bmri\b|\bfmri\b|magnetic\s*resonance|computed\s*tomograph|\bct\b|\bcta\b|\bx.?ray\b|radiograph|\bpet\b\s*scan|dicom|nifti/i, 'VISION_MEDICAL'],
@@ -155,7 +158,7 @@ const QUERY_MODALITY_SIGNALS: [RegExp, ModalityGroup][] = [
     [/\beeg\b|\becg\b|\bekg\b|time.?series|sensor\s*data/i, 'TIME_SERIES'],
     [/\btabular\b|\.csv|health\s*survey|questionnaire/i, 'TABULAR'],
     [/\bnlp\b|natural\s*language|text\s*classif|sentiment|document|\bmultilingual\b|\btext\b|\btickets?\b/i, 'TEXT_NLP'],
-    [/2d\s*rgb|\brgb\b|\bphoto(?:graph)?s?\b|\bvisual\b|\bnatural\s*image|\bcamera\b|\bimage\b/i, 'VISION_NATURAL'],
+    [/2d\s*rgb|\brgb\b|\bphoto(?:graph)?s?\b|\bvisual\b|\bnatural\s*images?|\bcamera\b|\bimages?\b/i, 'VISION_NATURAL'],
     [/\bmultispectral\b|\bhyperspectral\b|\bsatellite\b|\bremote\s*sensing\b|\bearth\s*observation\b/i, 'VISION_NATURAL'],
 ];
 

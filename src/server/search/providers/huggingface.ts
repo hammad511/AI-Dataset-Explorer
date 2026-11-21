@@ -30,7 +30,7 @@ export async function fetchHuggingFaceDatasets(
 
     for (const q of queries.slice(0, 4)) {
         try {
-            const url = `${HF_DATASETS_API}?search=${encodeURIComponent(q)}&limit=30&${HF_EXPAND_QUERY_PARAMS}`;
+            const url = `${HF_DATASETS_API}?search=${encodeURIComponent(q)}&limit=30&sort=downloads&direction=-1`;
             const res = await fetchHuggingFaceWithRetry(url, headers, { timeoutMs: 6000, maxRetries: 2 });
 
             if (!res || !res.ok) continue;

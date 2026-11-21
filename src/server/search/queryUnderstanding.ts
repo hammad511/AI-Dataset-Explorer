@@ -65,6 +65,11 @@ const DOMAIN_RULES: DomainMatchRule[] = [
         test: (q) => /melanoma|skin\s*(lesion|cancer|disease|tumor|condition)|isic|dermoscop|dermatolog/i.test(q),
     },
     {
+        domain: 'Document AI, OCR & Receipt / Invoice Extraction',
+        subdomains: ['Receipt & Invoice OCR', 'Key Information Extraction (KIE)', 'Vision-Language Document Parsing', 'Structured Line-Item Extraction'],
+        test: (q) => /\breceipts?\b|\binvoices?\b|\bocr\b|optical\s*character|scanned\s*(?:document|receipt|invoice|form|image)|key\s*information\s*extraction|\bkie\b|\bdocvqa\b|\bsroie\b|\bcord\b|\bfunsd\b|\bdonut\b|\blayoutlm\w*\b/i.test(q),
+    },
+    {
         domain: 'Clinical & Biomedical Natural Language Processing',
         subdomains: ['Clinical NER', 'Pathology Note Extraction', 'Biomedical Text Mining', 'EHR NLP'],
         test: (q) => /(?:clinical|pathology|medical|biomedical|ehr|radiology|patient|doctor|hospital|oncology).*(?:\bner\b|named\s*entity|notes?|text|reports?|nlp|token\s*classification|entity\s*extraction)/i.test(q) || (/\bner\b|named\s*entity/i.test(q) && /clinical|pathology|medical|biomedical|ehr|disease|drug/i.test(q)),
@@ -137,7 +142,7 @@ const DOMAIN_RULES: DomainMatchRule[] = [
     {
         domain: 'Audio & Speech Processing',
         subdomains: ['Speech Recognition', 'Acoustic Classification', 'Audio Forensics'],
-        test: (q) => /audio|speech|voice|wav|acoustic|sound|speaker/i.test(q),
+        test: (q) => /\baudio\b|\bspeech\b|\bvoice\b|\bwav\b|\bacoustic\b|\bsound\b|\bspeaker\b/i.test(q),
     },
     {
         domain: 'Autonomous Driving & Spatial Perception',
@@ -171,11 +176,18 @@ const DOMAIN_RULES: DomainMatchRule[] = [
 const GENERIC_ML_STOPWORDS = new Set([
     'a', 'an', 'the', 'and', 'or', 'for', 'to', 'in', 'on', 'of', 'with', 'from', 'by', 'at', 'as', 'into', 'over', 'under',
     'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'can', 'could',
-    'i', 'im', 'we', 'our', 'my', 'me', 'you', 'your', 'want', 'need', 'looking', 'search', 'find', 'build', 'building', 'create', 'creating',
-    'make', 'making', 'develop', 'developing', 'train', 'training', 'fine', 'tune', 'tuning', 'finetune', 'finetuning', 'use', 'using', 'based',
+    'must', 'shall', 'may', 'might', 'that', 'this', 'these', 'those', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
+    'all', 'both', 'each', 'every', 'any', 'some', 'such', 'other', 'another', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'also',
+    'i', 'im', 'we', 'our', 'my', 'me', 'you', 'your', 'it', 'its', 'they', 'them', 'their',
+    'want', 'wants', 'need', 'needs', 'looking', 'search', 'searching', 'find', 'finding', 'build', 'building', 'create', 'creating',
+    'make', 'making', 'develop', 'developing', 'train', 'training', 'fine', 'tune', 'tuning', 'finetune', 'finetuning', 'use', 'uses', 'used', 'using', 'based',
+    'run', 'runs', 'running', 'work', 'works', 'working', 'allow', 'allows', 'allowed', 'allowing', 'support', 'supports', 'supporting',
+    'extract', 'extracts', 'extracted', 'extracting', 'extraction', 'parse', 'parses', 'parsed', 'parsing', 'process', 'processing', 'handle', 'handling',
     'dataset', 'datasets', 'data', 'database', 'corpus', 'corpora', 'collection', 'benchmark', 'benchmarks', 'challenge',
     'model', 'models', 'architecture', 'architectures', 'network', 'networks', 'backbone', 'backbones', 'checkpoint', 'weights', 'pretrained',
-    'system', 'pipeline', 'project', 'application', 'solution', 'tool', 'framework', 'method', 'approach', 'algorithm',
+    'system', 'systems', 'pipeline', 'pipelines', 'project', 'projects', 'application', 'applications', 'solution', 'solutions',
+    'tool', 'tools', 'framework', 'frameworks', 'method', 'methods', 'approach', 'approaches', 'algorithm', 'algorithms',
+    'saas', 'b2b', 'b2c', 'mvp', 'poc', 'prod', 'production', 'enterprise', 'business', 'company', 'service', 'services', 'platform', 'api', 'sdk', 'app', 'workflow',
     'ai', 'ml', 'dl', 'deep', 'learning', 'machine', 'neural', 'artificial', 'intelligence', 'automated', 'automatic',
     'classification', 'classify', 'classifier', 'segmentation', 'segment', 'segmenter', 'detection', 'detect', 'detector',
     'recognition', 'recognize', 'prediction', 'predict', 'predictor', 'estimation', 'estimate', 'regression', 'clustering',
@@ -183,12 +195,29 @@ const GENERIC_ML_STOPWORDS = new Set([
     'image', 'images', 'imaging', 'photo', 'photos', 'photograph', 'photographs', 'picture', 'pictures', 'visual', 'vision',
     'video', 'videos', 'stream', 'streams', 'frame', 'frames', 'text', 'texts', 'tabular', 'table', 'csv', 'file', 'files',
     'real', 'time', 'realtime', 'near', 'fast', 'high', 'low', 'accuracy', 'accurate', 'precision', 'latency', 'speed', 'performance',
-    'lightweight', 'small', 'large', 'scale', 'open', 'source', 'public', 'available', 'free', 'commercial', 'safe', 'license',
-    'gpu', 'vram', 'memory', 'hardware', 'cuda', '2d', '3d', '4d', 'rgb', 'planar', 'volumetric',
+    'lightweight', 'small', 'large', 'scale', 'open', 'source', 'public', 'available', 'free', 'commercial', 'safe', 'license', 'licenses', 'licensed', 'permissive',
+    'mit', 'apache', 'bsd', 'gpl', 'lgpl', 'agpl', 'cc', 'cc0',
+    'gpu', 'gpus', 'vram', 'memory', 'hardware', 'cuda', 'cpu', 'tpu', 'npu', 'edge', 'cloud',
+    't4', 'l4', 'a10', 'a10g', 'v100', 'a100', 'h100', 'rtx', 'gtx', 'jetson', 'orin',
+    'qlora', 'lora', 'peft', 'fp16', 'bf16', 'fp32', 'int8', 'int4', 'nf4', 'gptq', 'awq', 'gguf', 'onnx', 'tensorrt', 'quantized', 'quantization',
+    '2d', '3d', '4d', 'rgb', 'planar', 'volumetric',
+    'structured', 'unstructured', 'semi', 'messy', 'noisy', 'clean', 'raw', 'complex', 'simple', 'custom', 'standard',
     'level', 'multi', 'single', 'task', 'domain', 'type', 'input', 'output', 'target', 'label', 'labels', 'labeled', 'annotated',
 ]);
 
+const SECONDARY_SCHEMA_FIELD_WORDS = new Set([
+    'line', 'item', 'items', 'date', 'dates', 'id', 'ids', 'number', 'numbers', 'name', 'names',
+    'field', 'fields', 'value', 'values', 'total', 'totals', 'amount', 'amounts', 'code', 'codes', 'record', 'records',
+]);
+
 export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
+    receipt: ['receipt', 'receipts', 'invoice', 'invoices', 'cord', 'sroie', 'donut', 'layoutlm', 'layoutlmv3', 'docvqa', 'ocr', 'document-parsing', 'expense'],
+    invoice: ['invoice', 'invoices', 'receipt', 'receipts', 'fatura', 'rvl-cdip', 'cord', 'sroie', 'donut', 'layoutlm', 'layoutlmv3', 'docvqa', 'ocr', 'billing', 'document'],
+    ocr: ['ocr', 'optical-character-recognition', 'receipt', 'invoice', 'scanned', 'document', 'trocr', 'donut', 'layoutlm', 'paddleocr', 'sroie', 'cord', 'docvqa', 'text-recognition'],
+    scanned: ['scanned', 'scan', 'ocr', 'receipt', 'invoice', 'document', 'form', 'funsd', 'sroie', 'cord', 'rvl-cdip', 'docvqa', 'layoutlm', 'donut'],
+    document: ['document', 'documents', 'docvqa', 'layoutlm', 'donut', 'ocr', 'invoice', 'receipt', 'form', 'funsd', 'rvl-cdip', 'pdf'],
+    vendor: ['vendor', 'invoice', 'receipt', 'billing', 'merchant', 'supplier', 'cord', 'sroie'],
+    tax: ['tax', 'invoice', 'receipt', 'financial', 'billing', 'accounting'],
     solar: ['solar', 'photovoltaic', 'pv', 'elpv', 'solar-panel', 'solar_panel', 'module'],
     panel: ['panel', 'photovoltaic', 'pv', 'solar', 'surface', 'module'],
     defect: ['defect', 'anomaly', 'crack', 'fault', 'damage', 'corrosion', 'inspection', 'mvtec', 'surface-defect'],
@@ -198,11 +227,14 @@ export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
     ner: ['ner', 'named-entity', 'named entity', 'token-classification', 'entity-extraction', 'entity recognition', 'bc5cdr', 'conll', 'i2b2'],
     notes: ['notes', 'clinical-notes', 'ehr', 'text', 'reports', 'medical-text', 'discharge', 'abstracts'],
     legal: ['legal', 'law', 'contract', 'contracts', 'legislation', 'court', 'statute', 'judicial', 'lexglue', 'eurlex', 'cuad', 'case-law'],
+    contract: ['contract', 'contracts', 'legal', 'cuad', 'lexglue', 'ledgar', 'clause', 'clauses'],
     rag: ['rag', 'retrieval', 'question-answering', 'qa', 'passage', 'embedding', 'document-retrieval', 'knowledge-intensive', 'bge'],
     multilingual: ['multilingual', 'cross-lingual', 'multi-language', 'xlm', 'mbert', 'translation'],
     plant: ['plant', 'leaf', 'leaves', 'crop', 'agriculture', 'agricultural', 'plantvillage', 'plantdoc', 'foliar', 'botanical'],
     leaf: ['leaf', 'leaves', 'plant', 'crop', 'plantvillage', 'foliar', 'blight', 'rust', 'mildew'],
+    disease: ['disease', 'diseases', 'pathology', 'lesion', 'infection', 'disorder', 'diagnosis'],
     fraud: ['fraud', 'fraudulent', 'credit-card', 'transaction', 'financial', 'banking', 'payment', 'anomaly', 'ieee-cis'],
+    credit: ['credit', 'credit-card', 'fraud', 'transaction', 'financial', 'banking', 'payment'],
     alzheimer: ['alzheimer', 'alzheimers', 'dementia', 'mci', 'adni', 'oasis', 'cognitive', 'neurodegenerative', 'brain'],
     cardiac: ['cardiac', 'heart', 'coronary', 'myocardium', 'myocardial', 'aorta', 'aortic', 'cardiovascular', 'acdc', 'asoca', 'ventricle'],
     coronary: ['coronary', 'cardiac', 'heart', 'vessel', 'artery', 'arteries', 'cta', 'ccta', 'asoca', 'stenosis'],
@@ -210,6 +242,7 @@ export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
     abdominal: ['abdominal', 'abdomen', 'liver', 'kidney', 'pancreas', 'spleen', 'amos', 'btcv', 'chaos', 'flare'],
     brain: ['brain', 'cerebral', 'neuro', 'glioma', 'glioblastoma', 'brats', 'intracranial', 'cranial', 'hippocampus', 'meningioma'],
     glioma: ['glioma', 'glioblastoma', 'brain-tumor', 'brain tumor', 'brats', 'lgg', 'hgg', 'neuro-oncology'],
+    tumor: ['tumor', 'tumour', 'neoplasm', 'lesion', 'oncology', 'cancer', 'segmentation', 'brats'],
     retina: ['retina', 'retinal', 'retinopathy', 'fundus', 'eyepacs', 'aptos', 'messidor', 'ophthalmology', 'diabetic-retinopathy'],
     retinopathy: ['retinopathy', 'retina', 'retinal', 'fundus', 'eyepacs', 'aptos', 'messidor', 'diabetic'],
     skin: ['skin', 'melanoma', 'dermoscopy', 'dermoscopic', 'isic', 'ham10000', 'dermatology', 'lesion', 'nevus'],
@@ -218,6 +251,7 @@ export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
     pneumonia: ['pneumonia', 'chest-xray', 'cxr', 'pulmonary', 'lung', 'chexpert', 'thoracic'],
     nuclei: ['nuclei', 'nuclear', 'cell', 'cellular', 'monuseg', 'pannuke', 'stardist', 'cellpose', 'histology', 'microscopy'],
     emotion: ['emotion', 'emotional', 'affect', 'affective', 'ravdess', 'iemocap', 'tess', 'crema-d', 'sentiment'],
+    speech: ['speech', 'audio', 'voice', 'ravdess', 'iemocap', 'wav2vec2', 'hubert', 'whisper', 'acoustic'],
     driver: ['driver', 'driving', 'drowsiness', 'drowsy', 'fatigue', 'yawdd', 'nthu', 'in-cabin'],
     vehicle: ['vehicle', 'vehicles', 'traffic', 'car', 'cars', 'automotive', 'bdd100k', 'kitti', 'nuscenes', 'highway'],
     seizure: ['seizure', 'epilepsy', 'epileptic', 'eeg', 'ieeg', 'chb-mit', 'tusz', 'electroencephalogram'],
@@ -225,9 +259,18 @@ export const DOMAIN_ANCHOR_SYNONYMS: Record<string, string[]> = {
     cryo: ['cryo', 'cryo-et', 'cryo-em', 'subtomogram', 'tomogram', 'electron-tomography', 'macromolecule'],
 };
 
+function canonicalizeAnchorToken(token: string): string {
+    if (DOMAIN_ANCHOR_SYNONYMS[token]) return token;
+    if (token.endsWith('s') && token.length > 4 && DOMAIN_ANCHOR_SYNONYMS[token.slice(0, -1)]) {
+        return token.slice(0, -1);
+    }
+    return token;
+}
+
 /**
  * Extracts high-specificity subject/domain anchor tokens from any natural-language problem statement,
- * stripping conversational filler, hardware numbers, and generic ML meta-words.
+ * stripping conversational filler, hardware numbers, and generic ML meta-words, and prioritizing
+ * primary domain nouns over secondary output field names.
  */
 export function extractAnchorSubjectTerms(rawQuery: string): {
     anchorTerms: string[];
@@ -236,38 +279,71 @@ export function extractAnchorSubjectTerms(rawQuery: string): {
 } {
     const cleaned = rawQuery
         .toLowerCase()
-        .replace(/\b\d+\s*(?:gb|g|tb|mb)\b/gi, ' ')
-        .replace(/\b(?:rtx|gtx|a100|a10g|v100|t4|h100)\s*\d*\b/gi, ' ')
-        .replace(/\b(?:mit|apache(?:\s*2\.0)?|bsd|cc-by|cc0)\b/gi, ' ')
+        .replace(/\b\d+(?:\.\d+)?\s*(?:gb|g|tb|mb|b|m)\b/gi, ' ')
+        .replace(/\b(?:rtx|gtx|a100|a10g|a10|v100|t4|l4|h100)\s*\d*\b/gi, ' ')
+        .replace(/\b(?:mit|apache(?:[- ]*2(?:\.0)?)?|bsd|cc-by|cc0)\b/gi, ' ')
         .replace(/[^a-z0-9\s-]/g, ' ');
 
+    // Identify tokens appearing inside "from <source>" or "on <source>" prepositional subject clauses
+    const sourceClauseTokens = new Set<string>();
+    const fromOnMatches = rawQuery.toLowerCase().matchAll(/\b(?:from|on|in|for|of)\s+([a-z0-9\s-]{3,65}?)(?:\.|,|;|\bthat\b|\bwith\b|\busing\b|\band\s+all\b|\bit\s+must\b|$)/gi);
+    for (const match of fromOnMatches) {
+        const words = (match[1] || '').split(/[^a-z0-9]+/).filter(Boolean);
+        for (const w of words) {
+            sourceClauseTokens.add(canonicalizeAnchorToken(w));
+        }
+    }
+
     const rawTokens = cleaned.split(/\s+/).filter(Boolean);
-    const anchorTerms: string[] = [];
+    const candidateAnchors: string[] = [];
 
     for (const tok of rawTokens) {
-        const bare = tok.replace(/^-+|-+$/g, '');
-        if (bare.length < 2) continue;
-        if (/^\d+$/.test(bare)) continue;
+        const bareRaw = tok.replace(/^-+|-+$/g, '');
+        if (bareRaw.length < 2) continue;
+        if (/^\d+$/.test(bareRaw)) continue;
 
-        // Keep domain acronyms like "ner", "rag", "eeg", "ecg", "ct", "mri", "oct", "sar", "pv", "asr"
-        const isImportantAcronym = /^(?:ner|rag|eeg|ecg|ekg|ieeg|cta|ccta|cxr|oct|sar|pv|asr|ehr|mci|adni|isic|brats|amos|coco|yolo)$/i.test(bare);
-        if (!isImportantAcronym && (bare.length <= 2 || GENERIC_ML_STOPWORDS.has(bare))) {
+        const isImportantAcronym = /^(?:ner|rag|ocr|kie|vqa|vlm|eeg|ecg|ekg|ieeg|cta|ccta|cxr|oct|sar|pv|asr|ehr|mci|adni|isic|brats|amos|coco|yolo)$/i.test(bareRaw);
+        if (!isImportantAcronym && (bareRaw.length <= 2 || GENERIC_ML_STOPWORDS.has(bareRaw))) {
             continue;
         }
 
-        // If hyphenated (e.g. "real-time", "multi-organ"), check sub-parts
-        if (bare.includes('-')) {
-            const parts = bare.split('-').filter(p => p.length >= 2 && !GENERIC_ML_STOPWORDS.has(p));
+        if (bareRaw.includes('-')) {
+            const parts = bareRaw.split('-').filter(p => p.length >= 2 && !GENERIC_ML_STOPWORDS.has(p));
             for (const p of parts) {
-                if (!anchorTerms.includes(p)) anchorTerms.push(p);
+                const canon = canonicalizeAnchorToken(p);
+                if (!GENERIC_ML_STOPWORDS.has(canon) && !candidateAnchors.includes(canon)) {
+                    candidateAnchors.push(canon);
+                }
             }
             continue;
         }
 
-        if (!anchorTerms.includes(bare)) {
-            anchorTerms.push(bare);
+        const canon = canonicalizeAnchorToken(bareRaw);
+        if (!GENERIC_ML_STOPWORDS.has(canon) && !candidateAnchors.includes(canon)) {
+            candidateAnchors.push(canon);
         }
     }
+
+    // Score each candidate anchor by domain specificity so primary domain subjects ("receipt", "invoice", "scanned")
+    // take precedence over secondary field names ("line", "items", "dates", "ids") in long multi-sentence prompts.
+    const scoredAnchors = candidateAnchors.map((term, idx) => {
+        let score = 0;
+        if (DOMAIN_ANCHOR_SYNONYMS[term]) score += 10;
+        if (sourceClauseTokens.has(term)) score += 5;
+        if (SECONDARY_SCHEMA_FIELD_WORDS.has(term)) score -= 6;
+        return { term, score, idx };
+    });
+
+    const hasHighSpecificityDomainTerms = scoredAnchors.some(a => a.score >= 8);
+    const filteredAnchors = hasHighSpecificityDomainTerms
+        ? scoredAnchors.filter(a => a.score > 0)
+        : scoredAnchors.filter(a => a.score >= -2);
+
+    const finalScored = (filteredAnchors.length > 0 ? filteredAnchors : scoredAnchors)
+        .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.idx - b.idx))
+        .slice(0, 6);
+
+    const anchorTerms = finalScored.map(a => a.term);
 
     // Build synonym groups for each extracted anchor term
     const expandedAnchorGroups: string[][] = anchorTerms.map((term) => {
@@ -385,10 +461,10 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
     if (/thermal|infrared|electroluminescen/i.test(qLower)) {
         modalities.push('Image / Thermal');
     }
-    if (/retin|fundus|photo|dermoscop|image|camera|picture|cats?\s*and\s*dogs|vehicle|solar\s*panel|plant|leaf|leaves|defect|surface/i.test(qLower) && !modalities.includes('Microscopy') && !modalities.includes('Image') && !modalities.includes('Image / Thermal') && !modalities.includes('MRI') && !modalities.includes('CT') && !modalities.includes('X-ray') && !modalities.includes('2D RGB') && !modalities.includes('Satellite / Multispectral')) {
+    if (/retin|fundus|photo|dermoscop|image|camera|picture|cats?\s*and\s*dogs|vehicle|solar\s*panel|plant|leaf|leaves|defect|surface|receipts?|invoices?|\bocr\b|scanned/i.test(qLower) && !modalities.includes('Microscopy') && !modalities.includes('Image') && !modalities.includes('Image / Thermal') && !modalities.includes('MRI') && !modalities.includes('CT') && !modalities.includes('X-ray') && !modalities.includes('2D RGB') && !modalities.includes('Satellite / Multispectral')) {
         modalities.push('Image');
     }
-    if (/audio|speech|voice|wav|acoustic/i.test(qLower)) {
+    if (/\baudio\b|\bspeech\b|\bvoice\b|\bwav\b|\bacoustic\b/i.test(qLower)) {
         modalities.push('Audio');
     }
 
@@ -456,6 +532,9 @@ export function parseResearchQuery(rawQuery: string): ResearchQuerySchema {
     }
     if (/named\s*entity\s*recognition|\bner\b|token\s*classification|entity\s*extraction/i.test(qLower)) {
         predictionTasks.push('Named Entity Recognition (NER)');
+    }
+    if (/\breceipts?\b|\binvoices?\b|\bocr\b|optical\s*character|key\s*information\s*extraction|\bkie\b|document\s*(?:parsing|extraction|understanding)|line\s*items?/i.test(qLower)) {
+        predictionTasks.push('Document OCR & Key Information Extraction (KIE)');
     }
     if (/\brag\b|retrieval|document\s*retrieval|question\s*answering|\bqa\b/i.test(qLower)) {
         predictionTasks.push('Information Retrieval / RAG');
